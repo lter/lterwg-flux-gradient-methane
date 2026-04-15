@@ -4,10 +4,11 @@
 metadata <- read.csv('/Volumes/MaloneLab/Research/FluxGradient/metadata_validation.csv') # has a list of all the sites
 
 # Add local directory for downloaded data here:
-localdir1 <-  "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient"
-localdir2 <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
-localdir3 <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
-setwd(localdir3)
+DirRepo <-  "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient"
+
+DirRepo.eval <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
+DirRepo.ch4 <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
+setwd(DirRepo.ch4)
 datadir <- '/Volumes/MaloneLab/Research/FluxGradient/FluxData' # MaloneLab Server
 
 DnldFromGoogleDrive <- FALSE # Enter TRUE to grab files listed in dnld_files from Google Drive. Enter FALSE if you have the most up-to-date versions locally in localdir
@@ -20,8 +21,8 @@ data_folder <- googledrive::drive_ls(path = drive_url)
 library(lutz)
 library(sf)
 
-source(fs::path(localdir2 ,'functions/calc.filter_FG.R' ))
-source(fs::path(localdir2 ,'functions/calc.SITELIST_FORMATTING.R'))
+source(fs::path(DirRepo.eval ,'functions/calc.filter_FG.R' ))
+source(fs::path(DirRepo.eval ,'functions/calc.SITELIST_FORMATTING.R'))
 
 site.list <- c('SE-Sto', 'SE-Svb', 'US-Uaf')
 # Creates the files for the filter report and Filters the data #####
@@ -278,7 +279,7 @@ library(gtools)
 library(ggplot2)
 library(ggpmisc)
 
-source(fs::path(localdir2,'functions/calc.diel.R' ))
+source(fs::path(DirRepo.eval,'functions/calc.diel.R' ))
 
 SITEval_DATA_FILTERED <- list() # Save all the data here:
 SITESval_MBR_9min_FILTER <- list()
@@ -310,7 +311,14 @@ for( site in site.list){
             TowerPosition_A, TowerPosition_B,  EC_mean, cross_grad_flag, dLevelsAminusB,
             RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15)
   
-  Data <- rbind( MBR_9min_FILTER_canopy,  AE_9min_FILTER_canopy, WP_9min_FILTER_canopy) %>% as.data.frame() 
+  Data <- rbind( MBR_9min_FILTER_canopy,  AE_9min_FILTER_canopy, WP_9min_FILTER_canopy) %>% as.data.frame() %>% 
+    mutate(month = format(timeEndA.local,'%m') %>% as.numeric,
+           Season = case_when(
+             month %in% c(12, 1, 2) ~ "Winter",
+             month %in% c(3, 4, 5) ~ "Spring",
+             month %in% c(6, 7, 8) ~ "Summer",
+             TRUE ~ "Autumn"),
+           hour = format(timeEndA.local,'%H'))
   
   SITEval_DATA_FILTERED[[site]] <- Data
   

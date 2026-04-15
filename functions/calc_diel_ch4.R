@@ -5,16 +5,16 @@ DIEL.season.ch4 <- function( dataframe, flux, Gas){
   dataframe <- dataframe %>% as.data.frame %>% rename( timeEndA.local = time.rounded)
   
   if(Gas == "CH4"){
-    dataframe$flux <- ((dataframe[, flux]* 16.042)/1000000)*1800 
+    dataframe$flux <- (dataframe[, flux]*2)*0.0000288872 # g CH 30 minutes
   }
   
   
   if(Gas == "CO2"){
-    dataframe$flux <- ((dataframe[, flux]* 44.01)/1000000)*1800 
+    dataframe$flux <- (((dataframe[, flux]*2)* 44.01)/1000000)*1800 
   }
   
   if(Gas == "H2O"){
-    dataframe$flux <- ((dataframe[, flux]* 16)/1000000)*1800 
+    dataframe$flux <- (((dataframe[, flux]*2)* 16)/1000000)*1800 
   }
   
   # Make sure season is in the dataframe:

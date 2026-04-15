@@ -1,7 +1,5 @@
 # flow.evaluation.batch.ch4
 
-rm(list=ls())
-
 library(tidyverse)
 library(ggplot2)
 library(ggpubr)
@@ -14,7 +12,6 @@ DirRepo.ch4 <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lt
 DirRepo.eval <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
 
 setwd(DirRepo.ch4)
-#localdir <- 'C:/Users/csturtevant/OneDrive - Battelle Ecology/FluxGradient/filterTesting' # We'll deposit output files here prior to uploading to Google Drive
 
 localdir <- '/Volumes/MaloneLab/Research/FluxGradient/FluxData'
 DnldFromGoogleDrive <- FALSE # Enter TRUE to grab files listed in dnld_files from Google Drive. Enter FALSE if you have the most up-to-date versions locally in localdir
@@ -49,12 +46,12 @@ save( SITES_WP_9min_FILTER,file=fileSave)
 googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
 message('Running Filter...')
-source(fs::path(DirRepo,'workflows/flow.filter.validation.R'))
-
+source(fs::path(DirRepo.ch4,'workflows/flow.filter.validation.R'))
 
 fileSave <- fs::path(localdir,paste0("SITEval_DATA_FILTERED_CH4.Rdata"))
 save( SITEval_DATA_FILTERED,file=fileSave)
 googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
+
 
 fileSave <- fs::path(localdir,paste0("SITESval_MBR_9min_FILTER_CH4.Rdata"))
 save( SITESval_MBR_9min_FILTER,file=fileSave)
