@@ -19,7 +19,7 @@ plot.diel <- ENSEMBLE_DIELSc  %>%  ggplot()+
 
 
 plot.totaldaily <- ENSEMBLE_DIELSc_wide  %>% 
-  ggplot( aes( x= FG_DIEL*1000, y=EC_DIEL*1000, col=site)) +
+  ggplot( aes( x= FG_DIEL, y=EC_DIEL, col=site)) +
   geom_point(alpha=0.5, size =2) + 
   geom_smooth(method = "lm", se =, size=0.5, formula = 'y ~ x + 0' ) +
   stat_regline_equation( aes(label = ..eq.label..), 
@@ -34,8 +34,8 @@ plot.totaldaily <- ENSEMBLE_DIELSc_wide  %>%
                         label.y.npc = 0.35) +
   geom_abline( slope=1, col="grey40", linetype="dashed", size =1) +
   theme_bw() +
-  scale_color_discrete_qualitative( palette = "Dark2") + ylab(expression(paste( " EC CH"[4], " ( mg m"^-2, " day" ^-1, ")")))  +
-  xlab(expression(paste( " GF CH"[4], " (mg m"^-2, " day" ^-1, ")"))) +
+  scale_color_discrete_qualitative( palette = "Dark2") + ylab(expression(paste( " EC CH"[4], " ( g C m"^-2, " day" ^-1, ")")))  +
+  xlab(expression(paste( " GF CH"[4], " (g C m"^-2, " day" ^-1, ")"))) +
   facet_wrap( ~site, ncol=1) 
 
 
@@ -86,12 +86,12 @@ plot.Q10 <- ENSEMBLE_Q10_eq4c_wide %>%
 
 plot.daily.boxplot <- ENSEMBLE_DIELSc_wide  %>% ggplot( ) +
   # geom_boxplot( aes( x= site, y = EC_DIEL), fill='transparent', col="grey" ) + 
-  geom_boxplot(aes( x= site, y = FG_DIEL*1000), fill='transparent') +
-  geom_jitter(aes( x= site, y = FG_DIEL*1000, col= Season), alpha = 0.5, size = 4) +
+  geom_boxplot(aes( x= site, y = FG_DIEL), fill='transparent') +
+  geom_jitter(aes( x= site, y = FG_DIEL, col= Season), alpha = 0.5, size = 4) +
   # geom_jitter( aes( x= site, y = EC_DIEL, col= season), alpha = 0.25, size = 4) + 
   theme_bw() +
   scale_color_paletteer_d("ggthemes::Seattle_Grays")  +
-  ylab(expression(paste( " GF CH"[4], " (mg m"^-2, " day" ^-1, ")"))) +
+  ylab(expression(paste( " GF CH"[4], " ( g C m"^-2, " day" ^-1, ")"))) +
   labs(color = "") + xlab("")
 
 
@@ -103,9 +103,11 @@ p2 <- ggarrange( plot.totaldaily, plot.Q10, plot.base ,
 
 final.plot <- ggarrange( p1 , p2, ncol=1)
 
-ggsave("/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane/FIGURES/Validation_Flux_Figure_p2.png", plot = p2 , width = 6, height = 6, units = "in")
+ggsave("/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane/FIGURES/Validation_Flux_Figure_p2.png", 
+       plot = p2 , width = 6.5, height = 6, units = "in")
 
-ggsave("/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane/FIGURES/Validation_Flux_Figure_p1.png", plot = p1 , width = 6, height = 3, units = "in")
+ggsave("/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane/FIGURES/Validation_Flux_Figure_p1.png", 
+       plot = p1 , width = 6.5, height = 3, units = "in")
 
 # Results:
 ENSEMBLE_DIELSc_wide$FG_DIEL %>% summary

@@ -133,28 +133,29 @@ parms.site.sf <-site.att.sf %>% left_join( parms.site , by="SITE_ID")
 
 NorthAmerica_AOI <- aoi.usa <- aoi_get(country = c('North America') )
 
+
 map.total <- ggplot( ) + geom_sf(data= NorthAmerica_AOI, fill = "black")+
   geom_sf( data= parms.site.season.sf %>% arrange(desc(DIEL*1000)) ,
            aes( size = abs(DIEL*1000),
                 col = DIEL*1000), alpha = 0.75) + theme_bw() +
   scale_color_paletteer_c("ggthemes::Orange-Blue Diverging", 
                           direction=1,
-                          limit = c(-0.015, 0.015),
+                          limit = c(-5, 5),
                           oob = scales::squish) + 
   facet_wrap( ~ Season) +                
   scale_size_continuous(range = c(1, 5)) +
   theme(strip.background = element_rect(fill = "transparent")) + 
-  labs(col=expression(paste("FCH"[4], "( mg m"^-2, "day"^-1, ")")),
-       size =expression(paste("|FCH"[4], "| ( mg m"^-2, "day"^-1, ")")))
+  labs(col=expression(paste("FCH"[4], "( mg C m"^-2, "day"^-1, ")")),
+       size =expression(paste("|FCH"[4], "| ( mg C m"^-2, "day"^-1, ")")))
 
   density.total <-  parms.site.season.sf  %>% 
   ggplot(aes(DIEL*1000, fill = Season)) +
   geom_density( position = "stack", aes(col=Season), alpha = 0.5) + theme_bw()+
     scale_color_paletteer_d("ggthemes::Seattle_Grays") +
     scale_fill_paletteer_d("ggthemes::Seattle_Grays") +
-    geom_vline( xintercept=0, linetype = "dashed")+ xlim( -0.05, 0.05) + 
+    geom_vline( xintercept=0, linetype = "dashed")+ xlim( -20, 20) + 
     ylab("Density") + 
-    xlab( expression(paste("Mean Seasonal FCH"[4], "( mg m"^-2, "day"^-1, ")")))
+    xlab( expression(paste("Mean Seasonal FCH"[4], "( mg C m"^-2, "day"^-1, ")")))
       
   total.season.final.plot <- ggarrange( map.total , 
                                         density.total, 
@@ -192,7 +193,7 @@ ggsave("FIGURES/Total_methane_season_plot.png",
     theme_bw()  + stat_summary(
       fun = median, 
       geom = "text",     # Color of the text
-      vjust = -13,
+      vjust = -12,
       size=3,
       aes(label = round(..y.., digits = 2)) )+ facet_wrap( ~ Season, ncol=4) + scale_color_manual(values = source_colors)+
    ylab("Q10") + xlab("") + theme(strip.background = element_rect(fill = "transparent", color = "black"),
@@ -201,15 +202,18 @@ ggsave("FIGURES/Total_methane_season_plot.png",
   
 DIEL.source.box.plots <- parms.site.season  %>%   filter(!is.na(Source)) %>% 
     ggplot(aes( x = Source, y = DIEL*1000, col = Source)) +
-    geom_boxplot(alpha=0.5)  + ylim(-0.05,0.05) +
-    theme_bw() +scale_color_manual(values = source_colors)+ theme(strip.background = element_rect(fill = "transparent", color = "black"), legend.position = "none") + ylab( expression(paste("Mean FCH"[4], " ( mg m"^-2, "day"^-1, ")")))
+    geom_boxplot(alpha=0.5)  + ylim(-20,20) +
+    theme_bw() +scale_color_manual(values = source_colors)+ 
+  theme(strip.background = element_rect(fill = "transparent", color = "black"), legend.position = "none") +
+  ylab( expression(paste("FCH"[4], " ( mg C m"^-2, "day"^-1, ")")))
   
   
 DIEL.source.box.seasons.plots <- parms.site.season  %>%   filter(!is.na(Source)) %>% 
     ggplot(aes( x = Source, y = DIEL*1000, col = Source)) +
-    geom_boxplot(alpha=0.5)  + ylim(-0.05,0.05) +
-    theme_bw() + facet_wrap( ~ Season, ncol=4)+scale_color_manual(values = source_colors)+ theme(strip.background = element_rect(fill = "transparent", color = "black"),
-                                                                                                 legend.position = "none") + ylab( expression(paste("Mean FCH"[4], " ( mg m"^-2, "day"^-1, ")")))
+    geom_boxplot(alpha=0.5)  + ylim(-20,20) +
+    theme_bw() + facet_wrap( ~ Season, ncol=4)+scale_color_manual(values = source_colors)+
+  theme(strip.background = element_rect(fill = "transparent", color = "black"),
+        legend.position = "none") + ylab( expression(paste("FCH"[4], " ( mg C m"^-2, "day"^-1, ")")))
   
 DIEL.plots <-ggarrange(DIEL.source.box.plots,
 DIEL.source.box.seasons.plots, ncol=1, labels= c("A", "B") )
@@ -226,6 +230,7 @@ ggsave("FIGURES/DIEL_plot.png", plot =   DIEL.plots , width = 5, height = 6, uni
 
   # Total Methane Figures Annual: ####
   library(ggpmisc)
+library(scales)
 
 map.DIEL.total <- ggplot( ) + geom_sf(data= NorthAmerica_AOI, fill = "black")+
   geom_sf( data= parms.site.sf %>% arrange(desc(DIEL )) ,
@@ -233,20 +238,20 @@ map.DIEL.total <- ggplot( ) + geom_sf(data= NorthAmerica_AOI, fill = "black")+
                 col =DIEL*1000), alpha = 0.75) + theme_bw() +
   scale_color_paletteer_c("ggthemes::Orange-Blue Diverging", 
                           direction=1,
-                          limit = c(-0.015, 0.015),
+                          limit = c(-10, 10),
                           oob = scales::squish,
                           breaks=pretty_breaks(n = 3)) +                
   scale_size_continuous(range = c(3, 5)) +
   theme(strip.background = element_rect(fill = "transparent")) + 
-  labs(col=expression(paste("FCH"[4], "( mg m"^-2, "day"^-1, ")")),
-       size =expression(paste("|FCH"[4], "| ( mg m"^-2, "day"^-1, ")")))
+  labs(col=expression(paste("FCH"[4], "( mg C m"^-2, "day"^-1, ")")),
+       size =expression(paste("|FCH"[4], "| ( mg C m"^-2, "day"^-1, ")")))
 
  MAT.MAP.plot <-  parms.site %>% filter(!is.na(Source)) %>% 
     ggplot(aes( x = MAT, y = MAP)) +
     geom_point(alpha=0.5, aes(col = DIEL*1000, size = DIEL*1000)) + 
     theme_bw()  +scale_color_paletteer_c("ggthemes::Orange-Blue Diverging", 
                                          direction=1,
-                                         limit = c(-0.015, 0.015),
+                                         limit = c(-10, 10),
                                          oob = scales::squish)+
    scale_size_continuous(range = c(1, 5))+
     theme(panel.background = element_rect(fill = "black"), # Plotting area
@@ -262,8 +267,8 @@ map.DIEL.total <- ggplot( ) + geom_sf(data= NorthAmerica_AOI, fill = "black")+
    facet_wrap( ~ Source_Sink + EcoType, ncol=3, scale="free") +
    scale_color_paletteer_c("ggthemes::Orange-Blue Diverging", 
                            direction=1,
-                           limit = c(-0.04, 0.04))  + 
-   ylab( expression(paste("FCH"[4], " ( mg m"^-2, "day"^-1, ")"))) +
+                           limit = c(-10, 10))  + 
+   ylab( expression(paste("FCH"[4], " ( mg C m"^-2, "day"^-1, ")"))) +
    theme(panel.background = element_rect(fill = "black"), # Plotting area
          panel.grid.major = element_line(color = "grey20"), 
          panel.grid.minor = element_line(color = "grey30"),
@@ -321,8 +326,8 @@ plot.MDS <-   parms.mds %>%  ggplot(aes( x=MDS1, y = MDS2, col=cluster %>% as.fa
 # Additional plots:
 
 plot.diel <-  parms.mds %>% ggplot(aes( x=cluster %>% as.factor, y =DIEL*1000, col=cluster %>% as.factor)) + geom_boxplot( )+ theme_bw() + geom_hline(yintercept = 0, col = "black", linetype="dashed") + 
-  ylab(expression(paste(" Mean FCH"[4], "( mg m"^-2, "day"^-1, ")"))) + xlab("Cluster") + 
-  scale_color_paletteer_d("ggsci::nrc_npg")+ theme(legend.position = "none") + ylim(-0.01, 0.01)
+  ylab(expression(paste(" Mean FCH"[4], "( mg C m"^-2, "day"^-1, ")"))) + xlab("Cluster") + 
+  scale_color_paletteer_d("ggsci::nrc_npg")+ theme(legend.position = "none") + ylim(-10, 10)
 
 plot.source <-  parms.mds %>% ggplot(aes( x=cluster %>% as.factor, y =Source %>% as.numeric-1, col=cluster %>% as.factor)) + geom_violin( ) + theme_bw() +  stat_summary(fun = mean, geom = "crossbar", width = 0.2) + 
   scale_color_paletteer_d("ggsci::nrc_npg") + theme(legend.position = "none") + ylab( "Number of Month as a Source")+ xlab("Cluster")
@@ -415,7 +420,7 @@ nrow( parms.site %>%  filter( Source_Sink == "Sink"))
 parms.site$SITE_ID[ parms.site$Source == 4] %>% unique %>% length
 parms.site$SITE_ID[ parms.site$Source == 0] %>% unique %>% length
 
-parms.site.source <- parms.sf %>% filter( DIEL > 0)
+
 # Measure the significance of difference between sinks and sources for Q10.
 kruskal.test(Q10.mean ~ Source_Sink , data =parms.mds) 
 
@@ -501,7 +506,10 @@ sd(parms.mds.cluster4$VSWCVar)
 mean(parms.mds.cluster4$beta_soc)
 sd(parms.mds.cluster4$beta_soc)
 
+summary.4 <- parms.mds.cluster4$DIEL*1000
+summary.4 %>% summary
 parms.mds %>% reframe( .by=cluster, 
-                       DIEL = median(DIEL)*1000 %>% round(4))
+                       DIEL = median(DIEL)*1000 %>% round(4),
+                       DIEL.SD = sd(DIEL)*1000 %>% round(4))
 
                        

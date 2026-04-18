@@ -5,7 +5,7 @@ DIEL.season.ch4 <- function( dataframe, flux, Gas){
   dataframe <- dataframe %>% as.data.frame %>% rename( timeEndA.local = time.rounded)
   
   if(Gas == "CH4"){
-    dataframe$flux <- (dataframe[, flux]*2)*0.0000288872 # g CH 30 minutes
+    dataframe$flux <- (((dataframe[, flux]*2)* 16.04)/1000000)*1800 
   }
   
   
@@ -36,7 +36,7 @@ DIEL.season.ch4 <- function( dataframe, flux, Gas){
       
       # Remove outliers:
       subset <- dataframe.gs %>% filter(season == i, 
-                                        flux > -50, flux < 50)
+                                        flux > -1000, flux < 1000)
       
       count <- subset$flux %>% na.omit %>% length
       
