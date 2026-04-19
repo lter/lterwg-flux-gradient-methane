@@ -512,4 +512,71 @@ parms.mds %>% reframe( .by=cluster,
                        DIEL = median(DIEL)*1000 %>% round(4),
                        DIEL.SD = sd(DIEL)*1000 %>% round(4))
 
+parms.mds %>% names
+parms.mds %>% ggplot( aes( x=VSWCMin, y=Q10.mean, col = cluster %>% as.factor)) + geom_smooth(method = 'loess') +
+  facet_wrap( ~cluster)
+randomForest::randomForest(cluster ~  Q10.mean + acidity + sulfurTot + DIEL+ MAT+ MAP ,
+                           data=parms.mds %>% mutate(cluster = as.factor(cluster)))
+
+randomForest::randomForest(cluster ~  Q10.mean + acidity + sulfurTot + DIEL+ MAT+ MAP +EcoType +beta_roots+ beta_soc,
+  data=parms.mds %>% mutate(cluster = as.factor(cluster))) 
+
+write.csv( parms.mds, file = "parms_mds.csv")
+
+# Copilot:
+
+# Cluster Analysis of Q10, Rref, and DIEL
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+
+# Simulating some data
+# In practice, you would want to load your actual dataset here
+set.seed(123)
+clusters <- rep(1:5, each = 20)
+Q10 <- rnorm(100, mean=2, sd=0.5)
+Rref <- rnorm(100, mean=5, sd=1.5)
+DIEL <- rnorm(100, mean=10, sd=2)
+
+# Creating a data frame
+data <- parms.mds
+
+# 1. Q10 by cluster
+q10_plot <- ggplot(data, aes(x=factor(cluster), y=Q10.mean)) + 
+  geom_boxplot() + 
+  labs(title='Q10 by Cluster', x='Cluster', y='Q10')
+print(q10_plot)
+
+# 2. Rref by cluster
+rref_plot <- ggplot(data, aes(x=factor(cluster), y=Rref.mean)) + 
+  geom_boxplot() + 
+  labs(title='Rref by Cluster', x='Cluster', y='Rref')
+print(rref_plot)
+
+# 3. DIEL by cluster
+diel_plot <- ggplot(data, aes(x=factor(cluster), y=DIEL*1000)) + 
+  geom_boxplot() + 
+  labs(title='DIEL by Cluster', x='Cluster', y='DIEL')
+print(diel_plot) + ylim(-20, 20)
+
+# 4. Scatter plot of Q10 vs DIEL
+q10_diel_plot <- ggplot(data, aes(x=Q10.mean, y=DIEL*1000, col=factor(cluster))) + 
+  geom_point(aes(color=factor(cluster))) + 
+  labs(title='Q10 vs DIEL', x='Q10', y='DIEL') + ylim( -20,20) + geom_smooth(method="lm")
+
+print(q10_diel_plot) 
+
+# 5. Scatter plot of Rref vs DIEL
+rref_diel_plot <- ggplot(data, aes(x=Rref.mean, y=DIEL)) + 
+  geom_point(aes(color=factor(cluster))) + 
+  labs(title='Rref vs DIEL', x='Rref', y='DIEL')
+print(rref_diel_plot)
+
+# 6. Relationship between Q10/Rref and DIEL patterns
+combined_plot <- ggplot(data, aes(x=Q10.mean/Rref.mean, y=DIEL*1000, color=factor(cluster))) + 
+  geom_point(aes(color=factor(cluster))) + 
+  labs(title='Relationship between Q10/Rref and DIEL', x='Q10/Rref', y='DIEL')+ ylim( -20,20) + geom_smooth(method="lm")
+print(combined_plot)
+
                        
