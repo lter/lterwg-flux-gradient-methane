@@ -5,7 +5,7 @@ library(AOI)
 library(ggplot2)
 library(colorspace)
 
-load(  fs::path(localdir,paste0("SITEval_DATA_FILTERED_CH4.Rdata")))
+load( fs::path(localdir.ch4 ,paste0("SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_TotalFlux.Rdata")) )
 
 # See what is in the attribute table for the datasets:
 
@@ -47,9 +47,9 @@ measLevel <- function( attr){
             dLevelsAminusB =  paste(TowerPosition, TowerPosition_B, sep="_")) %>% filter( Mes_Dist >0) %>% select ( Mes_Dist , dLevelsAminusB, Mes_Ht, Mes_Ht_B)
 }
 
-usuaf.att <- read.csv(fs::path(localdir,paste0("/US-Uaf/usuaf_attr.csv"))) %>% adjust.attr () %>% measLevel %>% mutate( SITE_ID = "US-Uaf")
-sesvb.att <- read.csv(fs::path(localdir,paste0("/SE-Svb/sesvb_attr.csv")))%>% adjust.attr () %>% measLevel %>% mutate( SITE_ID = "SE-Svb")
-sesto.att <- read.csv(fs::path(localdir,paste0("/SE-Sto/sesto_attr.csv")))%>% adjust.attr () %>% measLevel %>%mutate( SITE_ID = "SE-Sto")
+usuaf.att <- read.csv(fs::path(localdir,paste0("/Validation_Sites/US-Uaf/usuaf_attr.csv"))) %>% adjust.attr () %>% measLevel %>% mutate( SITE_ID = "US-Uaf")
+sesvb.att <- read.csv(fs::path(localdir,paste0("/Validation_Sites/SE-Svb/sesvb_attr.csv")))%>% adjust.attr () %>% measLevel %>% mutate( SITE_ID = "SE-Svb")
+sesto.att <- read.csv(fs::path(localdir,paste0("/Validation_Sites/SE-Sto/sesto_attr.csv")))%>% adjust.attr () %>% measLevel %>%mutate( SITE_ID = "SE-Sto")
 
 
 attributes_val <- rbind( usuaf.att, sesvb.att, sesto.att) %>% left_join(val.sites.shp , by="SITE_ID")%>% mutate( canopy_level_A = case_when(Mes_Ht > CHM ~ "A",

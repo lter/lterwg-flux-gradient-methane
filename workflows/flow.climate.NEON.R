@@ -4,9 +4,9 @@ library(ggpubr)
 library(ggplot2)
 library(colorspace)
 
-localdir <- '/Volumes/MaloneLab/Research/FluxGradient/FluxData'
+localdir <- '/Volumes/MaloneLab/Research/FluxGradient/METHANE'
 
-load( fs::path(localdir,paste0("SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE.Rdata")) )
+load( fs::path(localdir,paste0("/SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_TotalFlux.Rdata")) )
 
 DirRepo.CH4 <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
 
@@ -30,12 +30,12 @@ metadata <- read.csv('/Volumes/MaloneLab/Research/FluxGradient/Ameriflux_NEON fi
 # Calculate diels by Season: ####
 Climate_Summary_YearMon <- data.frame()
 Climate_Summary_Season <- data.frame()
-site.list <- SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE %>% names 
+site.list <- SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_storage %>% names 
 
 for( site in site.list){
   print(site)
   
-  data.yearmon <- SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE[[site]] %>% mutate(
+  data.yearmon <- SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_storage[[site]] %>% mutate(
     hour = format(time.rounded,'%H'),
     YearMon = format(time.rounded, "%Y-%m")) %>% distinct %>% reframe( 
       .by=YearMon,
@@ -48,7 +48,7 @@ for( site in site.list){
 
   # Seasonal Summary:
   
-  data.season <- SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE[[site]] %>% mutate(
+  data.season <- SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_storage[[site]] %>% mutate(
     hour = format(time.rounded,'%H'),
     YearMon = format(time.rounded, "%Y-%m")) %>% distinct %>% reframe( 
       .by=season,

@@ -106,4 +106,4 @@ for ( site in site.list[c(1:30, 32:47)]){
 
 save( Site_SoilData,
       Site_SoilData_Season,
-      file=paste(localdir, "/", 'Soildata_YearMon.Rdata', sep=""))
+      file=paste(localdir.ch4, "/", 'Soildata_YearMon.Rdata', sep=""))

@@ -7,7 +7,7 @@ library(sf)
 library(AOI)
 
 # Import data and build the files needed: ####
-localdir <- '/Volumes/MaloneLab/Research/FluxGradient/FluxData'
+localdir <- '/Volumes/MaloneLab/Research/FluxGradient/METHANE'
 
 # Load parameter information:
 load(file = fs::path(localdir,paste0("NEON_PARMS_DIEL_Q10.Rdata")))
@@ -22,7 +22,7 @@ avni2 <- read.csv( paste("/Volumes/MaloneLab/Research/FluxGradient/Avni's Data/n
 # Load site information:
 soil.data.biogeo <- read.csv(file=paste(localdir, "/", 'Soil_Biogeochem_RootBiomass.csv', sep=""))
 # Load canopy information: 
-canopy <- read.csv(file.path(paste(localdir, "canopy_commbined.csv", sep="/"))) %>% distinct
+canopy <- read.csv("/Volumes/MaloneLab/Research/FluxGradient/canopy_commbined.csv") %>% distinct
 
 canopy.Ht <- canopy %>% rename(SITE_ID = Site) %>% 
   reframe( .by= SITE_ID,
@@ -123,6 +123,302 @@ parms.site <- parms.site.season %>% mutate( Source = case_when( DIEL > 0 ~ 1,
 parms.site.season.sf <-site.att.sf %>% left_join( parms.site.season , by="SITE_ID")
 
 parms.site.sf <-site.att.sf %>% left_join( parms.site , by="SITE_ID")
+
+# Drivers of CH4, stored as DIEL in parms: ####
+
+parms.diel <- parms %>%
+  mutate(DIEL_mgC_m2_day = DIEL * 1000) %>%
+  filter(is.finite(DIEL_mgC_m2_day))
+
+# Soil-moisture variables vary monthly within sites, so evaluate them as anomalies.
+monthly.driver.variables <- c('VSWCMean', 'VSWCMin', 'VSWCVar') %>%
+  intersect(names(parms.diel))
+
+DIEL.monthly.driver.data <- parms.diel %>%
+  dplyr::select(SITE_ID, Date, Season, DIEL_mgC_m2_day, dplyr::all_of(monthly.driver.variables)) %>%
+  group_by(SITE_ID) %>%
+  mutate(
+    DIEL_site_mean = mean(DIEL_mgC_m2_day, na.rm = TRUE),
+    DIEL_anomaly = DIEL_mgC_m2_day - DIEL_site_mean,
+    across(dplyr::all_of(monthly.driver.variables), ~ .x - mean(.x, na.rm = TRUE), .names = "{.col}_anomaly")
+  ) %>%
+  ungroup()
+
+DIEL.monthly.driver.summary <- purrr::map_dfr(monthly.driver.variables, function(driver) {
+  driver.df <- DIEL.monthly.driver.data %>%
+    dplyr::select(SITE_ID, Season, DIEL_anomaly, driver_anomaly = dplyr::all_of(paste0(driver, "_anomaly"))) %>%
+    drop_na() %>%
+    filter(is.finite(DIEL_anomaly), is.finite(driver_anomaly))
+  
+  if (nrow(driver.df) < 10 || length(unique(driver.df$driver_anomaly)) < 4) {
+    return(tibble(driver = driver, scale = "within_site_monthly", n = nrow(driver.df),
+                  spearman_rho = NA_real_, p.value = NA_real_, deviance_explained = NA_real_,
+                  delta_AIC = NA_real_))
+  }
+  
+  fit <- mgcv::gam(
+    DIEL_anomaly ~ s(driver_anomaly, k = 5) + Season,
+    data = driver.df,
+    method = "REML"
+  )
+  null_fit <- mgcv::gam(DIEL_anomaly ~ Season, data = driver.df, method = "REML")
+  test <- suppressWarnings(cor.test(driver.df$driver_anomaly, driver.df$DIEL_anomaly, method = "spearman"))
+  
+  tibble(
+    driver = driver,
+    scale = "within_site_monthly",
+    n = nrow(driver.df),
+    spearman_rho = unname(test$estimate),
+    p.value = test$p.value,
+    deviance_explained = summary(fit)$dev.expl,
+    delta_AIC = AIC(null_fit) - AIC(fit)
+  )
+})
+
+plot.DIEL.monthly.drivers <- DIEL.monthly.driver.data %>%
+  dplyr::select(SITE_ID, Season, DIEL_anomaly, dplyr::all_of(paste0(monthly.driver.variables, "_anomaly"))) %>%
+  pivot_longer(
+    cols = dplyr::all_of(paste0(monthly.driver.variables, "_anomaly")),
+    names_to = "driver",
+    values_to = "driver_anomaly"
+  ) %>%
+  filter(is.finite(DIEL_anomaly), is.finite(driver_anomaly)) %>%
+  mutate(driver = str_remove(driver, "_anomaly$")) %>%
+  left_join(DIEL.monthly.driver.summary, by = "driver") %>%
+  mutate(driver_label = paste0(driver, "\nwithin-site rho = ", round(spearman_rho, 2))) %>%
+  ggplot(aes(x = driver_anomaly, y = DIEL_anomaly)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey45") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey45") +
+  geom_point(aes(color = Season), alpha = 0.4, size = 1.1) +
+  geom_smooth(method = "gam", formula = y ~ s(x, k = 5), color = "black", linewidth = 0.8, se = TRUE) +
+  facet_wrap(~driver_label, scales = "free_x", ncol = 3) +
+  theme_bw() +
+  scale_color_brewer(palette = "Dark2", na.translate = FALSE) +
+  labs(
+    x = "Within-site driver anomaly",
+    y = expression(paste("Within-site CH"[4], " anomaly (mg C ", m^-2, " ", day^-1, ")")),
+    color = "Season"
+  ) +
+  theme(strip.background = element_rect(fill = "transparent", color = "black"))
+
+ggsave("FIGURES/DIEL_monthly_driver_anomalies.png", plot = plot.DIEL.monthly.drivers, width = 9, height = 4.6, units = "in")
+
+# Site-level variables explain across-site differences, so evaluate them on site means.
+site.driver.variables <- c(
+  'sulfurTot', 'dryMass', 'acidity',
+  'FRC.kg.C.m.2', 'SOC.kg.C.m.2',
+  'beta_roots', 'beta_soc',
+  'MAP', 'MAT'
+) %>% intersect(names(parms.site))
+
+DIEL.site.driver.data <- parms.site %>%
+  dplyr::select(SITE_ID, EcoType, DIEL, dplyr::all_of(site.driver.variables)) %>%
+  mutate(DIEL_mgC_m2_day = DIEL * 1000) %>%
+  filter(is.finite(DIEL_mgC_m2_day))
+
+DIEL.site.driver.summary <- purrr::map_dfr(site.driver.variables, function(driver) {
+  driver.df <- DIEL.site.driver.data %>%
+    dplyr::select(SITE_ID, EcoType, DIEL_mgC_m2_day, driver_value = dplyr::all_of(driver)) %>%
+    drop_na() %>%
+    filter(is.finite(DIEL_mgC_m2_day), is.finite(driver_value))
+  
+  if (nrow(driver.df) < 6 || length(unique(driver.df$driver_value)) < 4) {
+    return(tibble(driver = driver, scale = "across_site", n = nrow(driver.df),
+                  spearman_rho = NA_real_, p.value = NA_real_, deviance_explained = NA_real_,
+                  delta_AIC = NA_real_))
+  }
+  
+  fit <- mgcv::gam(DIEL_mgC_m2_day ~ s(driver_value, k = min(5, length(unique(driver.df$driver_value)) - 1)),
+                   data = driver.df, method = "REML")
+  null_fit <- lm(DIEL_mgC_m2_day ~ 1, data = driver.df)
+  test <- suppressWarnings(cor.test(driver.df$driver_value, driver.df$DIEL_mgC_m2_day, method = "spearman"))
+  
+  tibble(
+    driver = driver,
+    scale = "across_site",
+    n = nrow(driver.df),
+    spearman_rho = unname(test$estimate),
+    p.value = test$p.value,
+    deviance_explained = summary(fit)$dev.expl,
+    delta_AIC = AIC(null_fit) - AIC(fit)
+  )
+})
+
+DIEL.driver.summary <- bind_rows(DIEL.monthly.driver.summary, DIEL.site.driver.summary) %>%
+  arrange(desc(delta_AIC), desc(abs(spearman_rho)))
+
+print(DIEL.driver.summary)
+write.csv(DIEL.driver.summary, file = "OUTPUT/DIEL_driver_summary.csv", row.names = FALSE)
+
+important.site.DIEL.drivers <- DIEL.site.driver.summary %>%
+  filter(is.finite(delta_AIC)) %>%
+  slice_max(order_by = delta_AIC, n = 6, with_ties = FALSE) %>%
+  pull(driver)
+
+plot.DIEL.site.drivers <- DIEL.site.driver.data %>%
+  dplyr::select(SITE_ID, EcoType, DIEL_mgC_m2_day, dplyr::all_of(important.site.DIEL.drivers)) %>%
+  pivot_longer(cols = dplyr::all_of(important.site.DIEL.drivers), names_to = "driver", values_to = "driver_value") %>%
+  filter(is.finite(DIEL_mgC_m2_day), is.finite(driver_value)) %>%
+  left_join(DIEL.site.driver.summary, by = "driver") %>%
+  mutate(driver_label = paste0(driver, "\nsite rho = ", round(spearman_rho, 2))) %>%
+  ggplot(aes(x = driver_value, y = DIEL_mgC_m2_day)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey45") +
+  geom_point(aes(color = EcoType), alpha = 0.75, size = 2.2) +
+  geom_smooth(method = "gam", formula = y ~ s(x, k = 4), color = "black", linewidth = 0.8, se = TRUE) +
+  facet_wrap(~driver_label, scales = "free_x", ncol = 3) +
+  theme_bw() +
+  labs(
+    x = "Site-level driver value",
+    y = expression(paste("Mean CH"[4], " as DIEL (mg C ", m^-2, " ", day^-1, ")")),
+    color = "EcoType"
+  ) +
+  theme(strip.background = element_rect(fill = "transparent", color = "black"))
+
+ggsave("FIGURES/DIEL_site_driver_relationships.png", plot = plot.DIEL.site.drivers, width = 9, height = 6.5, units = "in")
+
+plot.DIEL.driver.evidence <- DIEL.driver.summary %>%
+  mutate(driver = factor(driver, levels = rev(driver))) %>%
+  ggplot(aes(x = driver, y = delta_AIC, fill = scale)) +
+  geom_col() +
+  coord_flip() +
+  theme_bw() +
+  labs(x = "", y = "AIC improvement over null model", fill = "Analysis scale")
+
+ggsave("FIGURES/DIEL_driver_model_evidence.png", plot = plot.DIEL.driver.evidence, width = 7, height = 5.5, units = "in")
+
+# Site consistency as CH4 source, sink, or fluctuating: ####
+
+site.consistency.threshold <- 0.75
+
+DIEL.site.consistency <- parms.diel %>%
+  dplyr::select(SITE_ID, Date, Season, DIEL_mgC_m2_day) %>%
+  arrange(SITE_ID, Date) %>%
+  group_by(SITE_ID) %>%
+  mutate(
+    source_month = DIEL_mgC_m2_day > 0,
+    sign_change = source_month != lag(source_month)
+  ) %>%
+  reframe(
+    n_months = sum(!is.na(DIEL_mgC_m2_day)),
+    prop_source_months = mean(source_month, na.rm = TRUE),
+    prop_sink_months = 1 - prop_source_months,
+    mean_DIEL_mgC_m2_day = mean(DIEL_mgC_m2_day, na.rm = TRUE),
+    median_DIEL_mgC_m2_day = median(DIEL_mgC_m2_day, na.rm = TRUE),
+    sd_DIEL_mgC_m2_day = sd(DIEL_mgC_m2_day, na.rm = TRUE),
+    sign_changes = sum(sign_change, na.rm = TRUE)
+  ) %>%
+  mutate(
+    CH4_behavior = case_when(
+      prop_source_months >= site.consistency.threshold ~ "Consistent source",
+      prop_source_months <= 1 - site.consistency.threshold ~ "Consistent sink",
+      TRUE ~ "Fluctuating"
+    ),
+    CH4_behavior = factor(CH4_behavior, levels = c("Consistent sink", "Fluctuating", "Consistent source"))
+  ) %>%
+  left_join(
+    parms.site %>%
+      dplyr::select(SITE_ID, EcoType, dplyr::all_of(site.driver.variables)),
+    by = "SITE_ID"
+  )
+
+write.csv(DIEL.site.consistency, file = "OUTPUT/DIEL_site_consistency.csv", row.names = FALSE)
+
+DIEL.site.behavior.tests <- purrr::map_dfr(site.driver.variables, function(driver) {
+  test.df <- DIEL.site.consistency %>%
+    dplyr::select(CH4_behavior, value = dplyr::all_of(driver)) %>%
+    drop_na() %>%
+    filter(is.finite(value))
+  
+  if (nrow(test.df) < 6 || n_distinct(test.df$CH4_behavior) < 2 || n_distinct(test.df$value) < 4) {
+    return(tibble(driver = driver, n = nrow(test.df), p.value = NA_real_))
+  }
+  
+  test <- kruskal.test(value ~ CH4_behavior, data = test.df)
+  
+  tibble(
+    driver = driver,
+    n = nrow(test.df),
+    p.value = test$p.value
+  )
+}) %>%
+  arrange(p.value)
+
+DIEL.site.behavior.medians <- DIEL.site.consistency %>%
+  dplyr::select(CH4_behavior, dplyr::all_of(site.driver.variables)) %>%
+  pivot_longer(cols = dplyr::all_of(site.driver.variables), names_to = "driver", values_to = "value") %>%
+  filter(is.finite(value)) %>%
+  reframe(
+    .by = c(driver, CH4_behavior),
+    n = n(),
+    median = median(value, na.rm = TRUE),
+    q25 = quantile(value, 0.25, na.rm = TRUE),
+    q75 = quantile(value, 0.75, na.rm = TRUE)
+  )
+
+DIEL.site.behavior.summary <- DIEL.site.behavior.medians %>%
+  left_join(DIEL.site.behavior.tests, by = "driver") %>%
+  arrange(p.value, driver, CH4_behavior)
+
+print(DIEL.site.consistency %>% count(CH4_behavior))
+print(DIEL.site.behavior.summary)
+
+write.csv(DIEL.site.behavior.summary, file = "OUTPUT/DIEL_site_behavior_driver_summary.csv", row.names = FALSE)
+
+important.site.behavior.drivers <- DIEL.site.behavior.tests %>%
+  filter(!is.na(p.value)) %>%
+  slice_min(order_by = p.value, n = 6, with_ties = FALSE) %>%
+  pull(driver)
+
+plot.DIEL.site.behavior.map <- ggplot() +
+  geom_sf(data = site.att.sf, fill = "grey90", color = "white") +
+  geom_sf(
+    data = site.att.sf %>% left_join(DIEL.site.consistency, by = "SITE_ID"),
+    aes(color = CH4_behavior, size = abs(mean_DIEL_mgC_m2_day)),
+    alpha = 0.8
+  ) +
+  theme_bw() +
+  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  scale_size_continuous(range = c(2, 6)) +
+  labs(color = "CH4 behavior", size = expression(paste("|mean CH"[4], "|")))
+
+ggsave("FIGURES/DIEL_site_behavior_map.png", plot = plot.DIEL.site.behavior.map, width = 7, height = 5, units = "in")
+
+plot.DIEL.site.behavior.phase <- DIEL.site.consistency %>%
+  ggplot(aes(x = prop_source_months, y = mean_DIEL_mgC_m2_day)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey45") +
+  geom_vline(xintercept = c(1 - site.consistency.threshold, site.consistency.threshold), linetype = "dotted", color = "grey45") +
+  geom_point(aes(color = CH4_behavior, size = n_months), alpha = 0.8) +
+  ggrepel::geom_text_repel(aes(label = SITE_ID), size = 2.6, max.overlaps = 30) +
+  theme_bw() +
+  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  labs(
+    x = "Fraction of months with CH4 source behavior",
+    y = expression(paste("Mean CH"[4], " as DIEL (mg C ", m^-2, " ", day^-1, ")")),
+    color = "CH4 behavior",
+    size = "Months"
+  )
+
+ggsave("FIGURES/DIEL_site_behavior_phase_space.png", plot = plot.DIEL.site.behavior.phase, width = 8, height = 6, units = "in")
+
+plot.DIEL.site.behavior.drivers <- DIEL.site.consistency %>%
+  dplyr::select(SITE_ID, CH4_behavior, dplyr::all_of(important.site.behavior.drivers)) %>%
+  pivot_longer(cols = dplyr::all_of(important.site.behavior.drivers), names_to = "driver", values_to = "value") %>%
+  filter(is.finite(value)) %>%
+  left_join(DIEL.site.behavior.tests, by = "driver") %>%
+  mutate(driver_label = paste0(driver, "\nKruskal p = ", signif(p.value, 2))) %>%
+  ggplot(aes(x = CH4_behavior, y = value, color = CH4_behavior)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.4) +
+  geom_jitter(width = 0.15, alpha = 0.65, size = 1.8) +
+  facet_wrap(~driver_label, scales = "free_y", ncol = 3) +
+  theme_bw() +
+  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  labs(x = "", y = "Site-level driver value", color = "CH4 behavior") +
+  theme(
+    strip.background = element_rect(fill = "transparent", color = "black"),
+    axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+
+ggsave("FIGURES/DIEL_site_behavior_driver_boxplots.png", plot = plot.DIEL.site.behavior.drivers, width = 10, height = 6.5, units = "in")
 
 
 

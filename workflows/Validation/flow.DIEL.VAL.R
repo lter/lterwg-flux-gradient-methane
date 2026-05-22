@@ -7,9 +7,7 @@ library(ggpubr)
 library(ggplot2)
 library(colorspace)
 
-localdir <- '/Volumes/MaloneLab/Research/FluxGradient/FluxData'
-
-load( fs::path(localdir,paste0("SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata")) )
+load( fs::path(localdir,paste0("/Validation_Sites/SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata")) )
 
 DirRepo.CH4 <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
 
@@ -102,12 +100,12 @@ ENSEMBLE_DIELS_Sitec <- ENSEMBLE_DIELSc %>%
 save(ENSEMBLE_DIELSc ,
      ENSEMBLE_Q10_eq4c,
      ENSEMBLE_DIELS_Sitec,
-     file = fs::path(localdir,paste0("Val_PARMS_DIEL_Q10_RSHPc.Rdata")))
+     file = fs::path(localdir,paste0("/Validation_Sites/Val_PARMS_DIEL_Q10_RSHPc.Rdata")))
 
 
 # DIEL PLOTS: ####
 
-load(file = fs::path(localdir,paste0("Val_PARMS_DIEL_Q10_RSHPc.Rdata")))
+load(file = fs::path(localdir,paste0("/Validation_Sites/Val_PARMS_DIEL_Q10_RSHPc.Rdata")))
 
 ENSEMBLE_DIELSc  %>%  ggplot()+ 
   geom_line(aes(x = Hour , y = DIEL, col=season, linetype = RSHP), size=0.25) +
@@ -225,4 +223,4 @@ save(ENSEMBLE_DIELSc ,
      ENSEMBLE_DIELSc_wide ,
      ENSEMBLE_Q10_eq4c_wide,
      ENSEMBLE_DIELS_Sitec,
-     file = fs::path(localdir,paste0("Val_PARMS_DIEL_Q10_RSHPc_wide.Rdata")))
+     file = fs::path(localdir,paste0("/Validation_Sites/Val_PARMS_DIEL_Q10_RSHPc_wide.Rdata")))

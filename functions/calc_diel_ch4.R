@@ -3,19 +3,8 @@
 DIEL.season.ch4 <- function( dataframe, flux, Gas){
   
   dataframe <- dataframe %>% as.data.frame %>% rename( timeEndA.local = time.rounded)
-  
-  if(Gas == "CH4"){
-    dataframe$flux <- (((dataframe[, flux]*2)* 16.04)/1000000)*1800 
-  }
-  
-  
-  if(Gas == "CO2"){
-    dataframe$flux <- (((dataframe[, flux]*2)* 44.01)/1000000)*1800 
-  }
-  
-  if(Gas == "H2O"){
-    dataframe$flux <- (((dataframe[, flux]*2)* 16)/1000000)*1800 
-  }
+
+    dataframe$flux <- (dataframe[, flux]*2) *0.0000288872 # g C 30 minutes
   
   # Make sure season is in the dataframe:
   dataframe.gs <- dataframe %>% 
@@ -23,32 +12,31 @@ DIEL.season.ch4 <- function( dataframe, flux, Gas){
              YearMon = timeEndA.local %>% format("%Y-%m"),
              Year = timeEndA.local %>% format("%Y"),
              Hour = timeEndA.local %>% format("%H") %>% as.numeric) %>% 
-    filter(!is.na( flux) == TRUE)
+    filter(!is.na(.data$flux))
   
-  season <- unique(dataframe.gs$season)
+  season_label <- unique(dataframe.gs$season)
+  season_label <- season_label[!is.na(season_label)]
+  if(length(season_label) == 0) season_label <- "all"
   
   message(" Ready to summarize by season")
   Final.data.all <- data.frame()
-  
-  for( i in season){
-    print(i)
+
     try({
       
       # Remove outliers:
-      subset <- dataframe.gs %>% filter(season == i, 
-                                        flux > -1000, flux < 1000)
+      subset <- dataframe.gs
       
       count <- subset$flux %>% na.omit %>% length
       
       if(count > 48){
         model <- loess( flux ~ Hour , data = subset )
         model %>% plot
-        Diel.df <- data.frame(Hour = seq(0, 23), season = i)
+        Diel.df <- data.frame(Hour = seq(0, 23), season = paste(season_label, collapse = ", "))
         pred <- predict(model, newdata = Diel.df, se=TRUE)
         
         new.data  <- Diel.df %>% mutate(DIEL = pred$fit, 
-                                        DIEL.SE =pred$fit* qt(0.95 / 2 + 0.5, 
-                                                              pred$df)) %>% mutate(data="all")
+                                        DIEL.SE = pred$se.fit * qt(0.95 / 2 + 0.5, 
+                                                                   pred$df)) %>% mutate(data="all")
         
         
         Peak <- new.data$DIEL %>% max(na.rm=T)
@@ -59,7 +47,7 @@ DIEL.season.ch4 <- function( dataframe, flux, Gas){
         new.data$count <- count
         Final.data.all <- rbind(Final.data.all, new.data) 
         rm(new.data)
-        } },silent=T)}
+        } },silent=T)
   
  
   message(" Done fitting loess for all data")
@@ -70,4 +58,6 @@ DIEL.season.ch4 <- function( dataframe, flux, Gas){
     return( Final.data)
   }
   
-}
+  }
+
+  

@@ -1,5 +1,7 @@
 # flow.evaluation.batch.ch4
 
+# Runs the analysis for NEON files:
+
 library(tidyverse)
 library(ggplot2)
 library(ggpubr)
@@ -12,8 +14,8 @@ DirRepo.ch4 <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lt
 DirRepo.eval <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
 
 setwd(DirRepo.ch4)
-
-localdir <- '/Volumes/MaloneLab/Research/FluxGradient/FluxData'
+localdir <- '/Volumes/MaloneLab/Research/FluxGradient'
+localdir.ch4 <- '/Volumes/MaloneLab/Research/FluxGradient/METHANE'
 DnldFromGoogleDrive <- FALSE # Enter TRUE to grab files listed in dnld_files from Google Drive. Enter FALSE if you have the most up-to-date versions locally in localdir
 
 email <- 'sparklelmalone@gmail.com'
@@ -29,59 +31,78 @@ site.list <- metadata$Site_Id.NEON %>% unique
 message('Running Filter...')
 source(fs::path(DirRepo.ch4,'workflows/flow.filter.NEON.R'))
 
-fileSave <- fs::path(localdir,paste0("SITE_DATA_FILTERED_CH4.Rdata"))
+fileSave <- fs::path(localdir.ch4,paste0("/NEON_GradientFlux_Data_Filter/SITE_DATA_FILTERED_CH4.Rdata"))
 save( SITE_DATA_FILTERED,file=fileSave)
 googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-fileSave <- fs::path(localdir,paste0("SITES_MBR_9min_FILTER_CH4.Rdata"))
+fileSave <- fs::path(localdir.ch4 ,paste0("/NEON_GradientFlux_Data_Filter/SITES_MBR_9min_FILTER_CH4.Rdata"))
 save( SITES_MBR_9min_FILTER,file=fileSave)
 googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-fileSave <- fs::path(localdir,paste0("SITES_AE_9min_FILTER_CH4.Rdata"))
+fileSave <- fs::path(localdir.ch4 ,paste0("/NEON_GradientFlux_Data_Filter/SITES_AE_9min_FILTER_CH4.Rdata"))
 save( SITES_AE_9min_FILTER ,file=fileSave)
 googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-fileSave <- fs::path(localdir,paste0("SITES_WP_9min_FILTER_CH4.Rdata"))
+fileSave <- fs::path(localdir.ch4 ,paste0("/NEON_GradientFlux_Data_Filter/SITES_WP_9min_FILTER_CH4.Rdata"))
 save( SITES_WP_9min_FILTER,file=fileSave)
 googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-message('Running Filter...')
-source(fs::path(DirRepo.ch4,'workflows/flow.filter.validation.R'))
-
-fileSave <- fs::path(localdir,paste0("SITEval_DATA_FILTERED_CH4.Rdata"))
-save( SITEval_DATA_FILTERED,file=fileSave)
-googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
-
-
-fileSave <- fs::path(localdir,paste0("SITESval_MBR_9min_FILTER_CH4.Rdata"))
-save( SITESval_MBR_9min_FILTER,file=fileSave)
-googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
-
-fileSave <- fs::path(localdir,paste0("SITESval_AE_9min_FILTER_CH4.Rdata"))
-save( SITESval_AE_9min_FILTER ,file=fileSave)
-googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
-
-fileSave <- fs::path(localdir,paste0("SITESval_WP_9min_FILTER_CH4.Rdata"))
-save( SITESval_WP_9min_FILTER,file=fileSave)
-googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
-
-# Counter Gradient (VAL): ####
-
-# Gradient Flux Validation (VAL): ####
-
-# Reliable sampling Height pairs (NEON): ####
+# RSHP:
+source(fs::path(DirRepo.ch4,'workflows/flow.RSHP.NEON_ID.R'))
 
 # Ensemble GF:
+source(fs::path(DirRepo.ch4,'workflows/flow.ENSEMBLE.NEON.R'))
+
+# Combine ensembled gradient flux with storage flux:
+source(fs::path(DirRepo.ch4,'workflows/flow.TotalFlux.R'))
+
+# load(fs::path(localdir.ch4 ,paste0("SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_TotalFlux.Rdata")))
 
 # Summarize Data Availability here!!!
 
 # DIELS (NEON): ####
+source(fs::path(DirRepo.ch4,'workflows/flow.DIEL.NEON.R'))
+# see which DIELS are better CO2 or H2O
 
-# Q10 FIT (NEON): ####
+#Explains why sites show specific patterns and how those patterns scale temporally-
+source(fs::path(DirRepo.ch4,'workflows/flow.30min.analysis.R'))  # makes files needed below
+source(fs::path(DirRepo.ch4,'workflows/NEON.ERA5.HalfHourlyGapfill.R'))
 
+source(fs::path(DirRepo.ch4,'workflows/NEON.FLUXNET.CH4FluxComparison.R'))
+
+source(fs::path(DirRepo.ch4,'workflows/NEON.StrongSink.DriverComparison.R'))
+source(fs::path(DirRepo.ch4,'workflows/NEON.DriveScale.Analysis.R')) # fix figure colors!
+
+# Using the following scripts, write a methods and restults section: flow.30min.analysis.R, NEON.StrongSink.DriverComparison.R, NEON.30min.Gapfill.R, NEON.ERA5.HalfHourlyGapfill.R, NEON.FLUXNET.CH4FluxComparison.R, and  NEON.DriveScale.Analysis.R
+
+
+# I want a plot of the diel patterns to show what is going on... potential links between oxygenation... What can we learn by comparing these patterns to seasonal patterns?
+
+# Exploratory:
+source(fs::path(DirRepo.ch4,'workflows/NEON.DIEL.Analysis2.R'))
+source(fs::path(DirRepo.ch4,'workflows/NEON.MonthlySinkBehavior.Analysis.R'))
+source(fs::path(DirRepo.ch4,'workflows/NEON.Supplementary.ModelDriverPlots.R'))
+source(fs::path(DirRepo.ch4,'workflows/NEON.30min.Gapfill.R')) # I am not sure I need this file!
+source(fs::path(DirRepo.ch4,'workflows/NEON.ConsistencyMagnitude.Analysis.R')) # fix figure colors!
+
+
+source(fs::path(DirRepo.ch4,'workflows/NEON.DIEL.Analysis2.R'))
+source(fs::path(DirRepo.ch4,'workflows/NEON.TotalFlux.AnnualBudget.R'))
+source(fs::path(DirRepo.ch4,'workflows/NEON.DIEL.SynthesisFigure.R'))
+
+
+
+# Original Analysis:
+
+source(fs::path(DirRepo.ch4,'workflows/flow.climate.NEON.R'))
+source(fs::path(DirRepo.ch4,'workflows/flow.soilmoisture.NEON.R'))
+source(fs::path(DirRepo.ch4,'workflows/flow.parms_results.R'))
 # Visualizations and Analysis (NEON): ####
 
+
 # Sinks and Sources:
+
+
 # Variability in Q10 and Base Respiration.
 # Relationship between soil moisture and parms?
 # Merge with co2 and H2o???

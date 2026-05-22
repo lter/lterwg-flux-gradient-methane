@@ -1,74 +1,19 @@
 # RSHP: ####
 library( ggplot2)
-source(fs::path(DirRepo.eval, 'functions/calc.One2One.CCC_testing.R'))
 
-load(fs::path(localdir,paste0("SITEval_DATA_FILTERED_CH4.Rdata")) )
-canopy.info <- read.csv( file.path(paste(localdir, "Val_canopy.csv", sep="/")))%>% rename(Site = SITE_ID)
+source(fs::path(DirRepo.ch4, 'functions/calc_CCC_SHP.R'))
 
-VAL_RSHP <- CCC_SamplingHeightPairs(DATA = SITEval_DATA_FILTERED) 
+load(fs::path(localdir.ch4, paste0("/SITEval_DATA_FILTERED_CH4.Rdata")) )
 
-file1 <- VAL_RSHP %>% 
-  mutate(Combination = paste(var1, var2, sep ="-")) %>%
-  rename( var= var1)%>% select(Site, gas, var, CCC )
-
-VAL_RSHP_EVAL <- rbind( file1, file2) %>% 
-  reframe( .by = c( Site, gas, var),
-           CCC.GF.max = max( CCC, na.rm=T), 
-           CCC.GF.min = min( CCC, na.rm=T), 
-           CCC.GF.mean = mean(CCC, na.rm=T), 
-           CCC.GF.median = median( CCC, na.rm=T),
-           CCC.GF.range = CCC.GF.max - CCC.GF.min) %>% 
-  separate(col = var, 
-             into = c("Approach", "dLevelsAminusB"), 
-             sep = "-") %>% 
-  left_join(canopy.info, by=c('Site', 'dLevelsAminusB')) %>% filter( Canopy_L1 != "WW", Canopy_L1 != "WA" )
-
-VAL_RSHP_EVAL$Canopy_L1 %>% unique
-
-# Save the file:
-
-save( VAL_RSHP,VAL_RSHP_EVAL,  file=fs::path(localdir,paste0("VAL_RSHP_CCC.Rdata")))
-googledrive::drive_upload(media = fs::path(localdir,paste0("VAL_RSHP_CCC.Rdata")), overwrite = T, path = drive_url)
+canopy.info <- read.csv( file.path(paste(localdir, "Val_canopy.csv", sep="/"))) %>% rename(Site = SITE_ID)
 
 # Use the RSHP model to Filter THE DATA: #####
-
-load(file= paste(localdir, 'SITE_RSHP_MODEL.Rdata', sep="") ) # The model is in here:
-
-library(randomForest)
-VAL_RSHP_EVAL$RSHP.rf <- predict(rf.good.ccc.ec, VAL_RSHP_EVAL)
-VAL_RSHP_EVAL$RSHP.rf %>% summary
 
 # Create Datasets with only the data in it from RSHP: 
 site.list <- SITEval_DATA_FILTERED %>% names()
 
-SITEval_DATA_FILTERED_RSHP <- list()
-
-for( site in site.list){
-  
-  VAL_RSHP_sum_site <- VAL_RSHP_EVAL %>% filter( Site == site) %>% na.omit
- 
-  SITEval_DATA_FILTERED_RSHP[[site]] <- SITEval_DATA_FILTERED[[site]] %>% 
-    full_join(VAL_RSHP_sum_site, by=c('gas', 'Approach', 'dLevelsAminusB' )) %>% 
-    filter(RSHP.rf ==1) %>%  
-    mutate(month = format(timeEndA.local,'%m') %>% as.numeric,
-           Season = case_when(
-             month %in% c(12, 1, 2) ~ "Winter",
-             month %in% c(3, 4, 5) ~ "Spring",
-             month %in% c(6, 7, 8) ~ "Summer",
-             TRUE ~ "Autumn"),
-           hour = format(timeEndA.local,'%H'))
-  
-}
-
-SITEval_DATA_FILTERED_RSHP
-
-save( SITEval_DATA_FILTERED_RSHP ,file=fs::path(localdir,paste0("SITEval_DATA_FILTERED_RSHP_ENSEMBLE.Rdata")))
-
-
 # Compare FG to EC: ####
 source(fs::path(DirRepo.eval, 'functions/calc.One2One.CCC_testing.R'))
-
-SITEval_DATA_FILTERED <-  SITEval_DATA_FILTERED 
 
 # Add canopy information:
 SITEval_DATA_FILTEREDc <- list()
@@ -90,10 +35,9 @@ CCC_VAL %>%  ggplot( aes( x= CCC, y =Site, col=Approach)) + geom_point() + theme
 CCC_RSHP$CCC %>% summary
 
 # Save the files: 
-save( CCC_RSHP,CCC_VAL, file= fs::path(localdir,paste0("CCC_CH4.Rdata")))
+save( CCC_RSHP,CCC_VAL, file= fs::path(localdir.ch4,paste0("/CCC_CH4.Rdata")))
 
 # Add RSHP information to the fluxes:
-
 
 SITEval_DATA_FILTERED_RSHPc <- list()
 
@@ -116,7 +60,7 @@ for( site in site.list){
 
 #Save files: 
   save( SITEval_DATA_FILTERED_RSHPc, SITEval_DATA_FILTERED_RSHP,
-        file= fs::path(localdir,paste0("SITEval_DATA_FILTERED_RSHP.Rdata")))
+        file= fs::path(localdir.ch4, paste0("/SITEval_DATA_FILTERED_RSHP.Rdata")))
 
 # Harmonize data and test result:  ####
 
@@ -157,7 +101,7 @@ SITEval_DATA_FILTERED_RSHPc_H <- harmonize_val(tibble = SITEval_DATA_FILTERED_RS
 
 #Save files: 
 save( SITEval_DATA_FILTERED_RSHP_H, SITEval_DATA_FILTERED_RSHPc_H,
-      file= fs::path(localdir,paste0("SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata")))
+      file= fs::path(localdir.ch4, paste0("/SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata")))
 
 # CCC for Harmonized data:
 

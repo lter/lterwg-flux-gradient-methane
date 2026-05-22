@@ -14,25 +14,28 @@ for( site in site.list){
   print( site)
   
   # Load the files:
-  localdir.site <- paste(localdir,"/", site, sep = "")
+  localdir.site <- paste(localdir,"/NEON_GradientFlux_Data/", site, sep = "")
   
-  canopy.sub <- read.csv(file.path(paste(localdir, "canopy_commbined.csv", sep="/"))) %>% 
+  canopy.sub <- read.csv(file.path(paste(localdir, "/canopy_commbined.csv", sep="/"))) %>% 
     distinct %>% mutate(RelativeDistB = MeasurementHeight_m_B - CanopyHeight, 
                         RelativeDistA = MeasurementHeight_m_A - CanopyHeight, 
                         MeasurementDist = MeasurementHeight_m_A - MeasurementHeight_m_B) %>% 
     filter(Site == site, Canopy_L1 != "WW") %>% select(Site, Canopy_L1, dLevelsAminusB)
   
-  files <- paste(site, "_Evaluation.Rdata", sep = "")
+  files <- paste( site, "_Evaluation.Rdata", sep = "")
   
   load(paste(localdir.site, "/", files, sep=""))
   
   # Add the canopy information to the file:
   MBR_9min.df.final <- MBR_9min.df.final  %>% 
-    full_join( canopy.sub , by = c('dLevelsAminusB'), relationship = "many-to-many") %>% filter(Canopy_L1 != "WW")
+    full_join( canopy.sub , by = c('dLevelsAminusB'), relationship = "many-to-many") %>% 
+    filter(Canopy_L1 != "WW")
   AE_9min.df.final <- AE_9min.df.final  %>% 
-    full_join( canopy.sub , by = c('dLevelsAminusB'), relationship = "many-to-many") %>% filter(Canopy_L1 != "WW")
+    full_join( canopy.sub , by = c('dLevelsAminusB'), relationship = "many-to-many") %>% 
+    filter(Canopy_L1 != "WW")
   WP_9min.df.final <- WP_9min.df.final  %>% 
-    full_join( canopy.sub , by = c('dLevelsAminusB'), relationship = "many-to-many") %>% filter(Canopy_L1 != "WW")
+    full_join( canopy.sub , by = c('dLevelsAminusB'), relationship = "many-to-many") %>% 
+    filter(Canopy_L1 != "WW")
   # Change the time to local:
   
   # Get NEON sites from the server and find the time zones: https://cran.r-project.org/web/packages/lutz/readme/README.html
@@ -193,7 +196,9 @@ for( site in site.list){
   
   
   # Output the files
-  localdir.site <- paste(localdir,"/", site, sep = "")
+  localdir.site <- paste(localdir,"/METHANE/NEON_GradientFlux_Data_Filter/", site, sep = "")
+  
+  dir.create(  localdir.site )
   
   write.csv( SITE_9min.report.stability.CO2,  paste(localdir.site, "/", site,"_9min.report.stability.CO2.csv", sep=""))
   write.csv( SITE_9min.report.CO2,  paste(localdir.site, "/", site,"_9min.report.CO2.csv", sep=""))
@@ -291,7 +296,7 @@ approach.df <- data.frame( Approach=c("MBR", "AE", "WP"))
 canopy <- canopy.info %>% cross_join(approach.df) %>% mutate(Approach = factor(Approach, levels = c("MBR", "AE", "WP") ),
                                                              RelativeDistB = MeasurementHeight_m_B - CanopyHeight, 
                                                              RelativeDistA = MeasurementHeight_m_A - CanopyHeight, 
-                                                             MeasurementDist = MeasurementHeight_m_A - MeasurementHeight_m_A) %>% filter(Canopy_L1 != "WW")
+                                                             MeasurementDist = MeasurementHeight_m_A - MeasurementHeight_m_B) %>% filter(Canopy_L1 != "WW")
 
 
 SITE_DATA_FILTERED <- list() # Save all the data here:
@@ -307,26 +312,28 @@ for( site in site.list){
   
   message( paste("Importing the data for ", site))
   
-  localdir.site <- paste(localdir,"/", site, sep = "")
-  load(paste(localdir.site, "/", site, "_FILTER.Rdata", sep=""))
+  localdir.site <- paste(localdir,"/NEON_GradientFlux_Data_Filter/", site, sep = "")
+  
+  load(paste(localdir.site, "/", site, "_FILTER_AA_AW.Rdata", sep=""))
   
   canopy.sub <- canopy %>% filter( Site == site) %>% select(Site, Canopy_L1, dLevelsAminusB, Approach)
   
   MBR_9min_FILTER_canopy <- canopy.sub %>% filter( Approach == "MBR") %>% 
-    full_join( MBR_9min_FILTER , by = c('dLevelsAminusB'), relationship = "many-to-many")  %>% 
+    full_join( MBR_9min_FILTER , by = c('dLevelsAminusB', 'Site', 'Canopy_L1'), relationship = "many-to-many")  %>% 
     select( timeEndA.local,FG_mean , Approach, Canopy_L1, gas, 
             TowerPosition_A, TowerPosition_B,  EC_mean, cross_grad_flag, dLevelsAminusB,
             RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15) %>% filter(Canopy_L1 != "WW")
+
   
   WP_9min_FILTER_canopy <- canopy.sub %>% filter( Approach == "WP") %>% 
-    full_join( WP_9min_FILTER , by = c('dLevelsAminusB'), relationship = "many-to-many" )  %>% 
+    full_join( WP_9min_FILTER , by = c('dLevelsAminusB', 'Site', 'Canopy_L1'), relationship = "many-to-many" )  %>% 
     select( timeEndA.local,FG_mean ,Approach, Canopy_L1, gas, 
             TowerPosition_A, TowerPosition_B,  EC_mean, cross_grad_flag, dLevelsAminusB,
             RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15) %>% filter(Canopy_L1 != "WW")
   
   AE_9min_FILTER_canopy <- canopy.sub %>% 
     filter( Approach == "AE") %>% 
-    full_join( AE_9min_FILTER , by = c('dLevelsAminusB'), 
+    full_join( AE_9min_FILTER , by = c('dLevelsAminusB', 'Site', 'Canopy_L1'), 
                relationship = "many-to-many")  %>% 
     select( timeEndA.local,FG_mean, Approach, Canopy_L1, gas, 
             TowerPosition_A, TowerPosition_B,  EC_mean, cross_grad_flag, dLevelsAminusB,
@@ -352,7 +359,7 @@ for( site in site.list){
   print( site)
   
   # Load the files:
-  localdir.site <- paste(localdir,"/", site, sep = "")
+  localdir.site <- paste(localdir,"/METHANE/NEON_GradientFlux_Data_Filter/", site, sep = "")
   
   files.CH4 <- paste(site, "_9min.report.CH4.csv", sep = "")
   
@@ -368,7 +375,7 @@ for( site in site.list){
   print( site)
   
   # Load the files:
-  localdir.site <- paste(localdir,"/", site, sep = "")
+  localdir.site <- paste(localdir,"/METHANE/NEON_GradientFlux_Data_Filter/", site, sep = "")
   
   files.CH4 <- paste(site, "_9min.report.stability.CH4.csv", sep = "")
   report.CH4 <- read.csv( paste( localdir.site,"/", files.CH4, sep="" ))
