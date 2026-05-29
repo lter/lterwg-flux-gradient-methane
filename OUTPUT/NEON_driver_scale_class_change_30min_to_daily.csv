@@ -1,0 +1,10 @@
+behavior_30min,CH4_daily_behavior,n_sites
+Consistent sink,Consistent sink,0
+Consistent sink,Fluctuating,0
+Consistent sink,Consistent source,0
+Fluctuating,Consistent sink,0
+Fluctuating,Fluctuating,18
+Fluctuating,Consistent source,0
+Consistent source,Consistent sink,0
+Consistent source,Fluctuating,12
+Consistent source,Consistent source,9

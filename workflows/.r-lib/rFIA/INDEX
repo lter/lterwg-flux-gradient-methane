@@ -1,0 +1,39 @@
+area                    Estimate forest land area from FIADB
+areaChange              Estimate land area change from the FIADB
+biomass                 Estimate tree biomass and carbon stocks from
+                        the FIADB
+carbon                  Estimate carbon stocks by IPCC forest carbon
+                        pools from the FIADB
+clipFIA                 Spatial and temporal queries for FIADB
+countiesRI              County boundaries of Rhode Island
+customPSE               Post-stratified estimator for custom variables
+                        in FIA Data
+diversity               Estimate diversity from FIADB
+dwm                     Estimate volume, biomass, and carbon stocks of
+                        down woody material (fuels) from FIADB
+fiaRI                   FIADB for Rhode Island 2013 - 2018
+findEVALID              Find EVALIDs used in the FIADB
+fsi                     Estimate the Forest Stability Index from the
+                        FIADB
+getDesignInfo           Extract design features for FIA inventories
+getFIA                  Download FIA Data and Load into R
+growMort                Estimate growth, recruitment, mortality, and
+                        harvest rates from FIADB
+intersectFIA            Intersect FIA data with spatial polygons
+invasive                Estimate invasive species coverage from FIADB
+makeClasses             Convert numeric variables to class intervals
+                        (factor)
+plotFIA                 Static and animated plots of FIA summaries
+readFIA                 Load FIA database into R environment from local
+                        directory
+seedling                Estimate seedling abundance per acre from FIADB
+standStruct             Estimate forest structural stage distribution
+                        from FIADB
+tpa                     Estimate trees per acre and basal area per acre
+                        from FIADB
+vegStruct               Estimate vegation cover by canopy layer from
+                        FIADB
+vitalRates              Estimate tree growth rates from FIADB
+volume                  Estimate merchantable tree volume from the
+                        FIADB
+writeFIA                Write FIA tables to local directory

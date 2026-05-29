@@ -1,14 +1,13 @@
-# Compare NEON daily CH4 fluxes with published FLUXNET-CH4 ecosystem-class rates.
+# Compare ERA5-gapfilled NEON gradient CH4 fluxes with published reference rates.
 #
 # Published ecosystem-class values are annual CH4 fluxes from Delwiche et al. (2021),
 # Table 1, converted from g C m-2 yr-1 to mg C m-2 d-1.
-# NEON values are site-level medians of lookup-filled daily total fluxes from
-# OUTPUT/NEON_scale_daily_flux_all_sites.csv. Daily rates are built on a
-# complete 48 half-hour grid and reported as mg C m-2 d-1.
+# NEON values are ERA5-gapfilled annual gradient/tower CH4 budgets from
+# OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv, converted to
+# mg C m-2 d-1 for comparison with FLUXNET, process-model, and chamber rates.
 
 library(tidyverse)
 library(ggplot2)
-library(patchwork)
 library(scales)
 
 localdir.ch4 <- Sys.getenv(
@@ -22,34 +21,40 @@ if (dir.exists(localdir.ch4)) {
 dir.create("OUTPUT", showWarnings = FALSE)
 dir.create("FIGURES", showWarnings = FALSE)
 
-model_data_file <- "OUTPUT/30min_ch4_model_data.csv"
 site_behavior_file <- "OUTPUT/30min_site_behavior.csv"
-adjusted_daily_flux_file <- "OUTPUT/NEON_scale_daily_flux_all_sites.csv"
+era5_annual_budget_file <- "OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv"
+era5_mean_annual_budget_file <- "OUTPUT/NEON_ERA5_gapfilled_mean_annual_budget.csv"
 
 if (!file.exists(site_behavior_file)) {
   stop("Missing OUTPUT/30min_site_behavior.csv. Run flow.30min.analysis.R first.")
 }
 
-if (!file.exists(adjusted_daily_flux_file)) {
+if (!file.exists(era5_annual_budget_file)) {
   stop(
-    "Missing ", adjusted_daily_flux_file, ". Run flow.30min.analysis.R first ",
-    "to create lookup-filled daily fluxes."
+    "Missing ", era5_annual_budget_file, ". Run NEON.ERA5.HalfHourlyGapfill.R first ",
+    "to create ERA5-gapfilled annual gradient flux budgets."
+  )
+}
+
+if (!file.exists(era5_mean_annual_budget_file)) {
+  stop(
+    "Missing ", era5_mean_annual_budget_file, ". Run NEON.ERA5.HalfHourlyGapfill.R first."
   )
 }
 
 behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
 behavior_colors <- c(
-  "Consistent sink" = "red3",
+  "Consistent sink" = "#2166AC",
   "Fluctuating" = "grey35",
-  "Consistent source" = "blue4"
+  "Consistent source" = "#B2182B"
 )
 
-base_plot_size <- 13
-panel_title_size <- 15
-axis_title_size <- 13
-axis_text_size <- 11.5
-legend_text_size <- 12
-legend_title_size <- 13
+base_plot_size <- 18
+panel_title_size <- 21
+axis_title_size <- 19
+axis_text_size <- 15
+legend_text_size <- 17
+legend_title_size <- 18
 
 # Annual mean fluxes and SD from FLUXNET-CH4 ecosystem classes.
 # Units in the source are g C m-2 yr-1.
@@ -97,10 +102,16 @@ process_model_uptake <- tribble(
   "MeMo v1.0", "Polar desert/rock/ice",     105,  48, "Murguia-Flores et al. 2018, Table 9"
 ) %>%
   mutate(
+    comparison_group = "Process-based soil CH4 model",
     daily_mgC_m2_day = -uptake_mgCH4_m2_yr * 12 / 16 / 365,
     daily_sd_mgC_m2_day = uptake_sd_mgCH4_m2_yr * 12 / 16 / 365,
     daily_low_mgC_m2_day = daily_mgC_m2_day - daily_sd_mgC_m2_day,
-    daily_high_mgC_m2_day = daily_mgC_m2_day + daily_sd_mgC_m2_day
+    daily_high_mgC_m2_day = daily_mgC_m2_day + daily_sd_mgC_m2_day,
+    annual_gC_m2_yr = daily_mgC_m2_day * 365 / 1000,
+    annual_sd_gC_m2_yr = daily_sd_mgC_m2_day * 365 / 1000,
+    n_sites = NA_integer_,
+    n_site_years = NA_integer_,
+    source_type = "Process-based model"
   ) %>%
   arrange(daily_mgC_m2_day) %>%
   mutate(plot_rank = rev(seq_len(dplyr::n())))
@@ -135,69 +146,131 @@ soil_chamber_reference <- tribble(
     source_type = "Soil chamber literature"
   )
 
+assign_reference_ecosystem <- function(ecosystem_class) {
+  case_when(
+    str_detect(ecosystem_class, regex("marsh|fen|swamp|bog|wetland|mangrove", ignore_case = TRUE)) ~ "Wetland",
+    str_detect(ecosystem_class, regex("lake", ignore_case = TRUE)) ~ "Lake",
+    str_detect(ecosystem_class, regex("rice|cropland", ignore_case = TRUE)) ~ "Cropland",
+    str_detect(ecosystem_class, regex("^upland$|drained|desert|rock|ice", ignore_case = TRUE)) ~ "Upland/Desert",
+    str_detect(ecosystem_class, regex("forest", ignore_case = TRUE)) ~ "Forest",
+    str_detect(ecosystem_class, regex("shrubland", ignore_case = TRUE)) ~ "Shrubland",
+    str_detect(ecosystem_class, regex("grassland|steppe|savanna", ignore_case = TRUE)) ~ "Grassland/Savanna",
+    str_detect(ecosystem_class, regex("tundra", ignore_case = TRUE)) ~ "Tundra",
+    str_detect(ecosystem_class, regex("urban", ignore_case = TRUE)) ~ "Urban",
+    TRUE ~ "Other"
+  )
+}
+
+ecosystem_levels <- c(
+  "Urban", "Lake", "Wetland", "Cropland", "Forest", "Shrubland",
+  "Grassland/Savanna", "Tundra", "Upland/Desert"
+)
+
 site_behavior <- read.csv(site_behavior_file) %>%
   mutate(
     SITE_ID = as.character(SITE_ID),
-    CH4_behavior = factor(CH4_behavior, levels = behavior_levels)
+    CH4_behavior = factor(CH4_behavior, levels = behavior_levels),
+    CH4_gradient_behavior = factor(CH4_gradient_behavior, levels = behavior_levels)
   )
 
-if (file.exists(adjusted_daily_flux_file)) {
-  daily_neon <- read.csv(adjusted_daily_flux_file) %>%
-    mutate(
-      SITE_ID = as.character(SITE_ID),
-      Date = as.Date(Date)
-    )
-}
-
-daily_neon <- daily_neon %>%
+era5_annual_budget <- read.csv(era5_annual_budget_file) %>%
+  mutate(
+    SITE_ID = as.character(SITE_ID),
+    Year = as.integer(Year),
+    annual_budget_gC_m2_yr = as.numeric(annual_budget_gC_m2_yr),
+    daily_mgC_m2_day = annual_budget_gC_m2_yr * 1000 / 365,
+    model_only_daily_mgC_m2_day = model_only_annual_budget_gC_m2_yr * 1000 / 365
+  ) %>%
   left_join(
-    site_behavior %>% dplyr::select(SITE_ID, CH4_behavior),
+    site_behavior %>% dplyr::select(SITE_ID, CH4_behavior, CH4_gradient_behavior, EcoType),
     by = "SITE_ID"
   ) %>%
   filter(
-    is.finite(daily_mgC_m2_day),
-    !is.na(Date),
-    !is.na(CH4_behavior)
+    is.finite(annual_budget_gC_m2_yr),
+    is.finite(daily_mgC_m2_day)
   )
 
-write.csv(daily_neon, "OUTPUT/NEON_daily_CH4_flux_rates_for_FLUXNET_comparison.csv", row.names = FALSE)
+era5_mean_annual_budget <- read.csv(era5_mean_annual_budget_file) %>%
+  mutate(
+    SITE_ID = as.character(SITE_ID),
+    era5_annual_behavior = factor(era5_annual_behavior, levels = behavior_levels)
+  )
 
-neon_site_summary <- daily_neon %>%
-  group_by(SITE_ID, CH4_behavior) %>%
+assign_neon_ecosystem <- function(ecotype) {
+  case_when(
+    ecotype == "Grassland" ~ "Grassland/Savanna",
+    ecotype %in% ecosystem_levels ~ ecotype,
+    TRUE ~ "Other"
+  )
+}
+
+coverage_summary <- era5_annual_budget %>%
   summarise(
-    n_days = n(),
-    median_n_30min_per_day = median(n_30min, na.rm = TRUE),
-    min_n_30min_per_day = min(n_30min, na.rm = TRUE),
+    coverage_median = median(observed_coverage, na.rm = TRUE),
+    coverage_mean = mean(observed_coverage, na.rm = TRUE),
+    coverage_max = max(observed_coverage, na.rm = TRUE)
+  )
+
+coverage_note <- paste0(
+  "Current ERA5 annual budgets have low observed half-hourly coverage ",
+  "(median ", percent(coverage_summary$coverage_median, accuracy = 0.1),
+  ", mean ", percent(coverage_summary$coverage_mean, accuracy = 0.1),
+  ", max ", percent(coverage_summary$coverage_max, accuracy = 0.1),
+  "), so NEON annual values should be interpreted as model-gapfilled estimates."
+)
+
+era5_site_summary <- era5_annual_budget %>%
+  left_join(
+    era5_mean_annual_budget %>%
+      dplyr::select(SITE_ID, era5_annual_behavior, mean_observed_coverage),
+    by = "SITE_ID"
+  ) %>%
+  mutate(
+    era5_annual_behavior = factor(era5_annual_behavior, levels = behavior_levels),
+    gradient_behavior_for_plot = coalesce(era5_annual_behavior, CH4_gradient_behavior, CH4_behavior)
+  ) %>%
+  group_by(SITE_ID, gradient_behavior_for_plot, CH4_gradient_behavior, CH4_behavior, EcoType) %>%
+  summarise(
+    n_years = n(),
+    mean_observed_coverage = mean(observed_coverage, na.rm = TRUE),
+    median_n_observed_30min_per_year = median(n_observed, na.rm = TRUE),
+    min_n_observed_30min_per_year = min(n_observed, na.rm = TRUE),
     daily_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE),
     daily_q25_mgC_m2_day = quantile(daily_mgC_m2_day, 0.25, na.rm = TRUE),
     daily_q75_mgC_m2_day = quantile(daily_mgC_m2_day, 0.75, na.rm = TRUE),
+    annual_gC_m2_yr = median(annual_budget_gC_m2_yr, na.rm = TRUE),
+    annual_q25_gC_m2_yr = quantile(annual_budget_gC_m2_yr, 0.25, na.rm = TRUE),
+    annual_q75_gC_m2_yr = quantile(annual_budget_gC_m2_yr, 0.75, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   mutate(
-    neon_class = recode(
-      as.character(CH4_behavior),
-      "Consistent sink" = "NEON strong sink",
-      "Fluctuating" = "NEON fluctuating",
-      "Consistent source" = "NEON source"
+    gradient_behavior_for_plot = factor(gradient_behavior_for_plot, levels = behavior_levels),
+    ecosystem_group = assign_neon_ecosystem(EcoType),
+    era5_gradient_class = recode(
+      as.character(gradient_behavior_for_plot),
+      "Consistent sink" = "NEON ERA5 gapfilled sink",
+      "Fluctuating" = "NEON ERA5 gapfilled fluctuating",
+      "Consistent source" = "NEON ERA5 gapfilled source"
     )
   )
 
-neon_class_summary <- neon_site_summary %>%
-  group_by(neon_class, CH4_behavior) %>%
+era5_class_summary <- era5_site_summary %>%
+  group_by(era5_gradient_class, gradient_behavior_for_plot) %>%
   summarise(
-    comparison_group = "NEON half-hour total flux",
-    ecosystem_class = first(neon_class),
+    comparison_group = "NEON ERA5 gapfilled gradient flux",
+    ecosystem_class = first(era5_gradient_class),
     n_sites = n_distinct(SITE_ID),
-    n_site_years = NA_integer_,
+    n_site_years = sum(n_years, na.rm = TRUE),
     daily_median_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE),
     daily_low_mgC_m2_day = quantile(daily_mgC_m2_day, 0.25, na.rm = TRUE),
     daily_high_mgC_m2_day = quantile(daily_mgC_m2_day, 0.75, na.rm = TRUE),
     daily_sd_mgC_m2_day = sd(daily_mgC_m2_day, na.rm = TRUE),
-    reference_id = "This analysis: median lookup-filled daily total fluxes from OUTPUT/NEON_scale_daily_flux_all_sites.csv",
-    source_type = "NEON behavior class",
+    reference_id = "This analysis: ERA5-gapfilled annual gradient flux budgets from OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv, converted to daily rates",
+    source_type = "NEON ERA5 gapfilled gradient",
     .groups = "drop"
   ) %>%
   mutate(
+    CH4_behavior = gradient_behavior_for_plot,
     daily_mgC_m2_day = daily_median_mgC_m2_day,
     annual_gC_m2_yr = daily_mgC_m2_day * 365 / 1000,
     annual_sd_gC_m2_yr = daily_sd_mgC_m2_day * 365 / 1000
@@ -218,7 +291,14 @@ comparison_table <- bind_rows(
       annual_sd_gC_m2_yr, daily_mgC_m2_day, daily_low_mgC_m2_day,
       daily_high_mgC_m2_day, n_sites, n_site_years, reference_id, source_type
     ),
-  neon_class_summary %>%
+  process_model_uptake %>%
+    mutate(CH4_behavior = NA_character_) %>%
+    dplyr::select(
+      comparison_group, ecosystem_class, CH4_behavior, annual_gC_m2_yr,
+      annual_sd_gC_m2_yr, daily_mgC_m2_day, daily_low_mgC_m2_day,
+      daily_high_mgC_m2_day, n_sites, n_site_years, reference_id, source_type
+    ),
+  era5_class_summary %>%
     dplyr::select(
       comparison_group, ecosystem_class, CH4_behavior, annual_gC_m2_yr,
       annual_sd_gC_m2_yr, daily_mgC_m2_day, daily_low_mgC_m2_day,
@@ -227,12 +307,24 @@ comparison_table <- bind_rows(
 ) %>%
   arrange(desc(daily_mgC_m2_day)) %>%
   mutate(
-    plot_rank = rev(seq_len(dplyr::n())),
-    source_type = factor(source_type, levels = c("Published ecosystem class", "Soil chamber literature", "NEON behavior class"))
+    source_type = factor(
+      source_type,
+      levels = c(
+        "Published ecosystem class",
+        "Soil chamber literature",
+        "Process-based model",
+        "NEON ERA5 gapfilled gradient"
+      )
+    ),
+    ecosystem_group = case_when(
+      source_type == "NEON ERA5 gapfilled gradient" ~ "Across NEON sites",
+      TRUE ~ assign_reference_ecosystem(ecosystem_class)
+    )
   )
 
 write.csv(comparison_table, "OUTPUT/CH4_flux_FLUXNET_NEON_comparison_values.csv", row.names = FALSE)
-write.csv(neon_site_summary, "OUTPUT/NEON_site_median_daily_CH4_flux_classes.csv", row.names = FALSE)
+write.csv(era5_annual_budget, "OUTPUT/NEON_ERA5_annual_gradient_flux_rates_for_FLUXNET_comparison.csv", row.names = FALSE)
+write.csv(era5_site_summary, "OUTPUT/NEON_ERA5_site_median_daily_gradient_flux_classes.csv", row.names = FALSE)
 write.csv(process_model_uptake, "OUTPUT/process_model_upland_CH4_uptake_values.csv", row.names = FALSE)
 write.csv(soil_chamber_reference, "OUTPUT/soil_chamber_CH4_flux_reference_values.csv", row.names = FALSE)
 
@@ -262,186 +354,357 @@ reference_lines <- c(
   "Mosier et al. (1991) report aerobic soil CH4-C uptake of about 1 to 3 kg CH4-C ha-1 yr-1 across diverse ecosystems including grasslands; this was converted to -0.274 to -0.822 mg C m-2 d-1.",
   "A Danish farmland chamber study reported CH4 fluxes from -0.43 to 0.19 mg CH4 m-2 d-1, with mean -0.15 mg CH4 m-2 d-1; this was converted to -0.3225 to 0.1425 mg C m-2 d-1, with mean -0.1125 mg C m-2 d-1.",
   "",
-  "## NEON values",
-  "NEON values are from this repository's lookup-filled daily total flux output: OUTPUT/NEON_scale_daily_flux_all_sites.csv and OUTPUT/30min_site_behavior.csv.",
-  "Daily NEON fluxes were computed on a complete 48 half-hour grid. Observed half-hours were retained; missing half-hours were filled from site month-hour, season-hour, biseason-hour, then annual-hour mean rates before summing to mg C m-2 d-1.",
-  "NEON points in the figure are site-level medians of those lookup-filled daily total fluxes. NEON behavior classes are from OUTPUT/30min_site_behavior.csv: Consistent sink, Fluctuating, and Consistent source.",
+  "## NEON ERA5-gapfilled gradient values",
+  "NEON values are from this repository's ERA5-gapfilled annual gradient/tower flux output: OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv and OUTPUT/NEON_ERA5_gapfilled_mean_annual_budget.csv.",
+  "Annual ERA5 budgets retained observed half-hourly gradient/tower fluxes where available and filled missing half-hours with predictions from the ERA5-driven GAM in NEON.ERA5.HalfHourlyGapfill.R.",
+  "Annual budgets in g C m-2 yr-1 were converted to daily rates as annual budget * 1000 / 365 = mg C m-2 d-1.",
+  "NEON points in the figure are site-level medians across ERA5-gapfilled site-years. NEON class summaries are grouped by ERA5 annual behavior class when available, with gradient/total behavior classes from OUTPUT/30min_site_behavior.csv as fallbacks.",
+  coverage_note,
   "",
   "## Output tables",
   "- OUTPUT/CH4_flux_FLUXNET_NEON_comparison_values.csv",
-  "- OUTPUT/NEON_daily_CH4_flux_rates_for_FLUXNET_comparison.csv",
-  "- OUTPUT/NEON_site_median_daily_CH4_flux_classes.csv",
+  "- OUTPUT/NEON_ERA5_annual_gradient_flux_rates_for_FLUXNET_comparison.csv",
+  "- OUTPUT/NEON_ERA5_site_median_daily_gradient_flux_classes.csv",
   "- OUTPUT/process_model_upland_CH4_uptake_values.csv",
   "- OUTPUT/soil_chamber_CH4_flux_reference_values.csv"
 )
 writeLines(reference_lines, "OUTPUT/CH4_flux_FLUXNET_NEON_comparison_references.md")
 
-plot_full <- comparison_table %>%
-  ggplot(aes(x = daily_mgC_m2_day, y = plot_rank)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey35", linewidth = 0.35) +
+source_offsets <- c(
+  "FLUXNET-CH4" = 0,
+  "Soil chambers" = 0,
+  "Process model" = 0,
+  "NEON ERA5" = 0
+)
+
+reference_plot_data <- comparison_table %>%
+  filter(source_type != "NEON ERA5 gapfilled gradient") %>%
+  mutate(
+    source_label = recode(
+      as.character(source_type),
+      "Published ecosystem class" = "FLUXNET-CH4",
+      "Soil chamber literature" = "Soil chambers",
+      "Process-based model" = "Process model"
+    ),
+    source_label = factor(source_label, levels = c("FLUXNET-CH4", "Soil chambers", "Process model", "NEON ERA5")),
+    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
+    y_base = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
+    y_plot = y_base + source_offsets[source_label]
+  ) %>%
+  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day)) %>%
+  reframe(
+    .by = c(ecosystem_group, source_label, y_base, y_plot),
+    n_estimates = dplyr::n(),
+    daily_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE),
+    daily_low_mgC_m2_day = min(daily_low_mgC_m2_day, na.rm = TRUE),
+    daily_high_mgC_m2_day = max(daily_high_mgC_m2_day, na.rm = TRUE)
+  )
+
+neon_plot_data <- era5_site_summary %>%
+  mutate(
+    source_label = factor("NEON ERA5", levels = c("FLUXNET-CH4", "Soil chambers", "Process model", "NEON ERA5")),
+    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
+    y_base = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
+    y_plot = y_base + source_offsets[source_label]
+  ) %>%
+  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day)) %>%
+  reframe(
+    .by = c(ecosystem_group, source_label, y_base, y_plot),
+    n_sites = dplyr::n(),
+    prop_source_sites = mean(daily_mgC_m2_day > 0, na.rm = TRUE),
+    daily_low_mgC_m2_day = quantile(daily_mgC_m2_day, 0.25, na.rm = TRUE),
+    daily_high_mgC_m2_day = quantile(daily_mgC_m2_day, 0.75, na.rm = TRUE),
+    daily_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE)
+  ) %>%
+  mutate(
+    grouped_behavior = case_when(
+      prop_source_sites >= 0.75 ~ "Consistent source",
+      prop_source_sites <= 0.25 ~ "Consistent sink",
+      TRUE ~ "Fluctuating"
+    ),
+    grouped_behavior = factor(grouped_behavior, levels = behavior_levels)
+  )
+
+neon_site_points <- era5_site_summary %>%
+  mutate(
+    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
+    y_base = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
+    y_plot = y_base,
+    grouped_behavior = factor(gradient_behavior_for_plot, levels = behavior_levels)
+  ) %>%
+  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day), !is.na(grouped_behavior))
+
+ecosystem_axis <- tibble(
+  ecosystem_group = factor(ecosystem_levels, levels = ecosystem_levels),
+  y_base = length(ecosystem_levels) - seq_along(ecosystem_levels) + 1
+)
+
+source_shapes <- c(
+  "FLUXNET-CH4" = 21,
+  "Soil chambers" = 24,
+  "Process model" = 22,
+  "NEON ERA5" = 21
+)
+source_fills <- c(
+  "FLUXNET-CH4" = NA,
+  "Soil chambers" = "#C49A6C",
+  "Process model" = "#CBC9E2",
+  "NEON ERA5" = "#009E73"
+)
+source_outline <- c(
+  "FLUXNET-CH4" = "grey15",
+  "Soil chambers" = "#C49A6C",
+  "Process model" = "#CBC9E2",
+  "NEON ERA5" = "#009E73"
+)
+source_legend_fills <- source_fills
+source_legend_fills["FLUXNET-CH4"] <- "white"
+source_legend_fills["NEON ERA5"] <- "black"
+source_legend_outline <- source_outline
+source_legend_outline["NEON ERA5"] <- "black"
+
+source_legend_data <- tibble(
+  source_label = factor(names(source_shapes), levels = names(source_shapes)),
+  daily_mgC_m2_day = 0,
+  y_plot = 0
+)
+
+axis_text_size <-16
+
+comparison_figure <- ggplot() +
+  annotate(
+    "rect",
+    xmin = -20,
+    xmax = 0,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "#DCEEFF",
+    alpha = 0.28
+  ) +
+  annotate(
+    "text",
+    x = -2.7,
+    y = max(ecosystem_axis$y_base) + 0.48,
+    label = "Upland Sink",
+    color = "#2166AC",
+    fontface = "bold",
+    size = 6,
+    hjust = 0
+  ) +
+  annotate(
+    "rect",
+    xmin = 0,
+    xmax = 10,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "#FDE0DD",
+    alpha = 0.24
+  ) +
+  annotate(
+    "text",
+    x = 0.18,
+    y = max(ecosystem_axis$y_base) + 0.48,
+    label = "Upland Source",
+    color = "#B2182B",
+    fontface = "bold",
+    size = 6,
+    hjust = 0
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey35", linewidth = 0.5) +
+  geom_hline(
+    data = ecosystem_axis,
+    aes(yintercept = y_base),
+    color = "grey92",
+    linewidth = 0.35
+  ) +
   geom_errorbar(
-    data = comparison_table %>% filter(source_type == "Published ecosystem class"),
-    aes(xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
+    data = reference_plot_data %>% filter(source_label == "FLUXNET-CH4"),
+    aes(
+      x = daily_mgC_m2_day,
+      y = y_plot,
+      xmin = daily_low_mgC_m2_day,
+      xmax = daily_high_mgC_m2_day
+    ),
     orientation = "y",
-    width = 0.18,
-    color = "grey35",
-    linewidth = 0.65
-  ) +
-  geom_point(
-    data = comparison_table %>% filter(source_type == "Published ecosystem class"),
-    shape = 21,
-    fill = "white",
-    color = "black",
-    size = 3.2,
-    stroke = 0.8
+    width = 0.07,
+    linewidth = 0.85,
+    color = source_outline["FLUXNET-CH4"],
+    alpha = 0.78
   ) +
   geom_errorbar(
-    data = comparison_table %>% filter(source_type == "Soil chamber literature"),
-    aes(xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
+    data = reference_plot_data %>% filter(source_label == "Soil chambers"),
+    aes(
+      x = daily_mgC_m2_day,
+      y = y_plot,
+      xmin = daily_low_mgC_m2_day,
+      xmax = daily_high_mgC_m2_day
+    ),
     orientation = "y",
-    width = 0.18,
-    color = "#238B45",
-    linewidth = 0.75
-  ) +
-  geom_point(
-    data = comparison_table %>% filter(source_type == "Soil chamber literature"),
-    shape = 24,
-    fill = "#A1D99B",
-    color = "#238B45",
-    size = 3.4,
-    stroke = 0.9
+    width = 0.07,
+    linewidth = 1.25,
+    color = source_outline["Soil chambers"],
+    alpha = 0.78
   ) +
   geom_errorbar(
-    data = comparison_table %>% filter(source_type == "NEON behavior class"),
-    aes(xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day, color = CH4_behavior),
+    data = reference_plot_data %>% filter(source_label == "Process model"),
+    aes(
+      x = daily_mgC_m2_day,
+      y = y_plot,
+      xmin = daily_low_mgC_m2_day,
+      xmax = daily_high_mgC_m2_day
+    ),
     orientation = "y",
-    width = 0.22,
-    linewidth = 0.75
+    width = 0.07,
+    linewidth = 1.25,
+    color = source_outline["Process model"],
+    alpha = 0.78
+  ) +
+  geom_errorbar(
+    data = neon_plot_data,
+    aes(
+      x = daily_mgC_m2_day,
+      y = y_plot,
+      xmin = daily_low_mgC_m2_day,
+      xmax = daily_high_mgC_m2_day,
+      color = grouped_behavior
+    ),
+    orientation = "y",
+    width = 0.07,
+    linewidth = 1.35,
+    alpha = 0.85
   ) +
   geom_point(
-    data = neon_site_summary %>%
-      left_join(
-        comparison_table %>% dplyr::select(ecosystem_class, plot_rank),
-        by = c("neon_class" = "ecosystem_class")
-      ),
-    aes(x = daily_mgC_m2_day, y = plot_rank, color = CH4_behavior),
-    alpha = 0.78,
-    size = 2.2,
-    position = position_jitter(height = 0.12, width = 0)
+    data = source_legend_data,
+    aes(x = daily_mgC_m2_day, y = y_plot, shape = source_label),
+    alpha = 0,
+    size = 0,
+    show.legend = TRUE
   ) +
   geom_point(
-    data = comparison_table %>% filter(source_type == "NEON behavior class"),
-    aes(color = CH4_behavior),
-    size = 3.8
+    data = reference_plot_data %>% filter(source_label == "FLUXNET-CH4"),
+    aes(x = daily_mgC_m2_day, y = y_plot),
+    shape = source_shapes["FLUXNET-CH4"],
+    fill = source_fills["FLUXNET-CH4"],
+    color = source_outline["FLUXNET-CH4"],
+    size = 8.6,
+    stroke = 1.0
   ) +
-  scale_color_manual(values = behavior_colors, name = "NEON class", na.translate = FALSE) +
+  geom_point(
+    data = reference_plot_data %>% filter(source_label == "Soil chambers"),
+    aes(x = daily_mgC_m2_day, y = y_plot),
+    shape = source_shapes["Soil chambers"],
+    fill = source_fills["Soil chambers"],
+    color = source_outline["Soil chambers"],
+    size = 8.6,
+    stroke = 1.0
+  ) +
+  geom_point(
+    data = reference_plot_data %>% filter(source_label == "Process model"),
+    aes(x = daily_mgC_m2_day, y = y_plot),
+    shape = source_shapes["Process model"],
+    fill = source_fills["Process model"],
+    color = source_outline["Process model"],
+    size = 8.6,
+    stroke = 1.0
+  ) +
+  geom_point(
+    data = neon_site_points,
+    aes(x = daily_mgC_m2_day, y = y_plot, color = grouped_behavior, fill = grouped_behavior),
+    shape = source_shapes["NEON ERA5"],
+    alpha = 0.3,
+    size = 3.0,
+    stroke = 0.8,
+    position = position_jitter(height = 0.11, width = 0, seed = 20260525),
+    show.legend = FALSE
+  ) +
+  geom_point(
+    data = neon_plot_data,
+    aes(x = daily_mgC_m2_day, y = y_plot, color = grouped_behavior, fill = grouped_behavior),
+    shape = source_shapes["NEON ERA5"],
+    alpha = 0.9,
+    size = 8.6,
+    stroke = 1.0
+  ) +
+  geom_point(
+    data = tibble(
+      daily_mgC_m2_day = 0,
+      y_plot = 0,
+      grouped_behavior = factor(behavior_levels, levels = behavior_levels)
+    ),
+    aes(x = daily_mgC_m2_day, y = y_plot, color = grouped_behavior),
+    alpha = 0,
+    size = 0,
+    show.legend = TRUE
+  ) +
+  scale_shape_manual(values = source_shapes, breaks = names(source_shapes), name = "Data source") +
+  scale_fill_manual(values = behavior_colors, breaks = behavior_levels, guide = "none", drop = FALSE, na.translate = FALSE) +
+  scale_color_manual(values = behavior_colors, breaks = behavior_levels, name = "NEON class", drop = FALSE, na.translate = FALSE) +
   scale_x_continuous(
     trans = pseudo_log_trans(sigma = 0.01),
-    breaks = c(-20, -5, -1, -0.1, 0, 0.1, 1, 10, 75, 100),
-    labels = c("-20", "-5", "-1", "-0.1", "0", "0.1", "1", "10", "75", "100")
+    breaks = c(-20, -5, -1, -0.1, 0, 0.1, 1, 10, 100),
+    labels = c("-20", "-5", "-1", "-0.1", "0", "0.1", "1", "10", "100")
   ) +
   scale_y_continuous(
-    breaks = comparison_table$plot_rank,
-    labels = comparison_table$ecosystem_class,
-    expand = expansion(mult = c(0.03, 0.03))
+    breaks = ecosystem_axis$y_base,
+    labels = ecosystem_axis$ecosystem_group,
+    expand = expansion(mult = c(0.05, 0.06))
   ) +
   labs(
-    title = "A. Published ecosystem and soil-chamber CH4 fluxes ranked high to low, with NEON classes overlaid",
+    title = "ERA5-gapfilled NEON gradient CH4 fluxes compared with published benchmarks",
+    subtitle = paste(
+      "Rows align comparable ecosystem types; symbols distinguish FLUXNET-CH4, process models, soil chambers, and NEON ERA5.",
+      "\nEach ecosystem/source pair is consolidated into one estimate; error bars show range or interquartile range. Negative values indicate CH4 uptake."
+    ),
     x = expression("Daily CH"[4] * " flux (mg C m"^-2 * " d"^-1 * "; pseudo-log scale)"),
-    y = NULL
+    y = NULL,
+    caption = paste(
+      "NEON values summarize site-level medians across ERA5-gapfilled annual gradient budgets converted to daily rates.",
+      coverage_note
+    )
+  ) +
+  guides(
+    shape = guide_legend(
+      override.aes = list(
+        shape = unname(source_shapes[names(source_shapes)]),
+        size = 9.6,
+        alpha = 1,
+        fill = unname(source_legend_fills[names(source_shapes)]),
+        colour = unname(source_legend_outline[names(source_shapes)]),
+        stroke = 1.2
+      ),
+      order = 1,
+      nrow = 1
+    ),
+    color = guide_legend(
+      override.aes = list(shape = 16, size = 9, alpha = 1, color = unname(behavior_colors[behavior_levels])),
+      order = 2,
+      nrow = 1
+    ),
+    fill = "none"
   ) +
   theme_bw(base_size = base_plot_size) +
   theme(
-    legend.position = "top",
-    plot.title = element_text(face = "bold", size = panel_title_size),
+    legend.position = "bottom",
+    legend.justification = "center",
+    legend.box = "vertical",
+    plot.title = element_text(face = "bold", size = 25),
+    plot.subtitle = element_text(size = 16),
+    plot.caption = element_text(size = 14, color = "grey25"),
     axis.title = element_text(size = axis_title_size),
     axis.text = element_text(size = axis_text_size),
     legend.title = element_text(size = legend_title_size),
     legend.text = element_text(size = legend_text_size),
+    panel.grid.major.y = element_blank(),
     panel.grid.minor = element_blank()
-  )
-
-plot_process_model <- process_model_uptake %>%
-  ggplot(aes(x = daily_mgC_m2_day, y = plot_rank)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey35", linewidth = 0.35) +
-  geom_errorbar(
-    aes(xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
-    orientation = "y",
-    width = 0.18,
-    linewidth = 0.65,
-    color = "grey35"
-  ) +
-  geom_point(shape = 21, fill = "white", color = "black", size = 3.1, stroke = 0.8) +
-  geom_point(
-    data = neon_site_summary,
-    aes(x = daily_mgC_m2_day, y = 0, color = CH4_behavior),
-    inherit.aes = FALSE,
-    show.legend = FALSE,
-    alpha = 0.75,
-    size = 2.1,
-    position = position_jitter(height = 0.13, width = 0)
-  ) +
-  scale_y_continuous(
-    breaks = c(process_model_uptake$plot_rank, 0),
-    labels = c(process_model_uptake$ecosystem_class, "NEON site medians"),
-    expand = expansion(mult = c(0.05, 0.04))
-  ) +
-  scale_color_manual(values = behavior_colors, guide = "none", na.translate = FALSE) +
-  labs(
-    title = "B. NEON compared with process-based upland soil CH4 uptake estimates",
-    x = expression("Daily CH"[4] * " flux (mg C m"^-2 * " d"^-1 * "; negative = uptake)"),
-    y = NULL
-  ) +
-  theme_bw(base_size = base_plot_size) +
-  theme(
-    legend.position = "top",
-    plot.title = element_text(face = "bold", size = panel_title_size),
-    axis.title = element_text(size = axis_title_size),
-    axis.text = element_text(size = axis_text_size),
-    panel.grid.minor = element_blank()
-  )
-
-comparison_figure <- plot_full / plot_process_model +
-  plot_layout(heights = c(1.45, 1.2), guides = "collect") +
-  plot_annotation(
-    title = "NEON CH4 fluxes are weak relative to published FLUXNET-CH4 ecosystem classes",
-    subtitle = paste(
-      "Published FLUXNET-CH4 values are ecosystem-class annual means +/- SD converted to daily units;",
-      "soil-chamber values are literature benchmarks; process-model values are MeMo v1.0 uptake means +/- SD by ecosystem type."
-    ),
-    caption = paste(
-      "Negative values indicate CH4 uptake. NEON absolute magnitudes depend on the repository conversion to CH4_mgC_30min" ),
-    theme = theme(
-      plot.title = element_text(face = "bold", size = 18),
-      plot.subtitle = element_text(size = 12.5),
-      plot.caption = element_text(size = 10, color = "grey25")
-    )
-  )
-
-comparison_figure <- comparison_figure &
-  theme(
-    legend.position = "top",
-    legend.justification = "center",
-    legend.box = "horizontal",
-    legend.title = element_text(size = legend_title_size),
-    legend.text = element_text(size = legend_text_size)
   )
 
 ggsave(
   "FIGURES/NEON_FLUXNET_CH4_flux_comparison.png",
   plot = comparison_figure,
-  width = 16,
+  width = 18,
   height = 10.5,
   units = "in",
   dpi = 300
 )
 
-ggsave(
-  "FIGURES/NEON_FLUXNET_CH4_flux_comparison.pdf",
-  plot = comparison_figure,
-  width = 16,
-  height = 10.5,
-  units = "in"
-)
-
-message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_comparison.png and .pdf")
+message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_comparison.png")

@@ -1,0 +1,31 @@
+response,driver,acts_30min,acts_daily,acts_annual,acts_at_scales,max_importance_median,driver_family
+magnitude_log_abs,PAR_within,TRUE,TRUE,FALSE,"30min, daily",1499.540519811716,within_site_temporal
+magnitude_log_abs,VSWC_within,TRUE,TRUE,FALSE,"30min, daily",225.72270558226086,within_site_temporal
+magnitude_log_abs,Tair_within,TRUE,TRUE,FALSE,"30min, daily",221.70945587837736,within_site_temporal
+magnitude_log_abs,day_of_year,TRUE,TRUE,FALSE,"30min, daily",200.38874764821102,seasonal_or_diel
+magnitude_log_abs,hour_of_day,TRUE,FALSE,FALSE,30min,14.69120322026447,seasonal_or_diel
+magnitude_log_abs,season,TRUE,TRUE,FALSE,"30min, daily",6.81423832590017,seasonal_or_diel
+magnitude_log_abs,EcoType,TRUE,TRUE,TRUE,"30min, daily, annual",6.0896001719876285,among_site_or_slow
+magnitude_log_abs,ERA5_VSWC_site_mean,FALSE,FALSE,TRUE,annual,1.8739800248069818,among_site_or_slow
+magnitude_log_abs,acidity,FALSE,FALSE,TRUE,annual,1.4081880536823053,among_site_or_slow
+magnitude_log_abs,ERA5_Tair_site_mean,FALSE,FALSE,TRUE,annual,1.023901630930398,among_site_or_slow
+magnitude_log_abs,ERA5_VSWC_within,FALSE,FALSE,TRUE,annual,0.6943905331373698,within_site_temporal
+magnitude_log_abs,ERA5_Tair_within,FALSE,FALSE,TRUE,annual,0.6779562559263189,within_site_temporal
+magnitude_log_abs,carbonTot,FALSE,FALSE,TRUE,annual,0.6609949008932977,among_site_or_slow
+magnitude_log_abs,MAP,FALSE,FALSE,TRUE,annual,0.44320717220349737,among_site_or_slow
+magnitude_log_abs,sulfurTot,FALSE,FALSE,FALSE,none,0,among_site_or_slow
+source_probability,PAR_within,TRUE,TRUE,FALSE,"30min, daily",3378.8447126769865,within_site_temporal
+source_probability,hour_of_day,TRUE,FALSE,FALSE,30min,2486.3176612843763,seasonal_or_diel
+source_probability,VSWC_within,TRUE,TRUE,FALSE,"30min, daily",1115.5369707353861,within_site_temporal
+source_probability,day_of_year,TRUE,TRUE,FALSE,"30min, daily",437.0710425679623,seasonal_or_diel
+source_probability,Tair_within,TRUE,TRUE,FALSE,"30min, daily",227.62759732431186,within_site_temporal
+source_probability,season,TRUE,TRUE,FALSE,"30min, daily",4.743924929101931,seasonal_or_diel
+source_probability,EcoType,TRUE,TRUE,FALSE,"30min, daily",4.538163317608679,among_site_or_slow
+source_probability,carbonTot,FALSE,FALSE,TRUE,annual,0.003185932332111164,among_site_or_slow
+source_probability,ERA5_Tair_site_mean,FALSE,FALSE,TRUE,annual,0.001383126236862958,among_site_or_slow
+source_probability,acidity,FALSE,FALSE,TRUE,annual,0.0013490083728560569,among_site_or_slow
+source_probability,MAP,FALSE,FALSE,FALSE,none,7.600045900741818e-4,among_site_or_slow
+source_probability,ERA5_VSWC_site_mean,FALSE,FALSE,FALSE,none,2.975026541315809e-4,among_site_or_slow
+source_probability,ERA5_VSWC_within,FALSE,FALSE,FALSE,none,8.293737424484819e-15,within_site_temporal
+source_probability,ERA5_Tair_within,FALSE,FALSE,FALSE,none,3.1571502753489377e-16,within_site_temporal
+source_probability,sulfurTot,FALSE,FALSE,FALSE,none,0,among_site_or_slow

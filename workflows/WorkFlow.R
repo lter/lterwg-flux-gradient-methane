@@ -67,43 +67,33 @@ source(fs::path(DirRepo.ch4,'workflows/flow.DIEL.NEON.R'))
 #Explains why sites show specific patterns and how those patterns scale temporally-
 source(fs::path(DirRepo.ch4,'workflows/flow.30min.analysis.R'))  # makes files needed below
 source(fs::path(DirRepo.ch4,'workflows/NEON.ERA5.HalfHourlyGapfill.R'))
+source(fs::path(DirRepo.ch4,'workflows/NEON.FLUXNET.CH4FluxComparison.R')) # Ensure this is using the ERA 5 data for the comparisons!
 
-source(fs::path(DirRepo.ch4,'workflows/NEON.FLUXNET.CH4FluxComparison.R'))
+# Attempts at upscalng for a global budget comparison:
+source(fs::path(DirRepo.ch4,'workflows/ERA-Upscaling.R'))
+source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialProbability.R')) 
+source(fs::path(DirRepo.ch4,'workflows/Download-ERA5Land-Monthly.R')) 
+source(fs::path(DirRepo.ch4,'workflows/Download-Process-MODIS-WAD2M.R')) 
+source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialUpscaling-Monthly.R')) 
 
+
+
+# Depreciated Files:
+# Exploratory:
 source(fs::path(DirRepo.ch4,'workflows/NEON.StrongSink.DriverComparison.R'))
 source(fs::path(DirRepo.ch4,'workflows/NEON.DriveScale.Analysis.R')) # fix figure colors!
-
-# Using the following scripts, write a methods and restults section: flow.30min.analysis.R, NEON.StrongSink.DriverComparison.R, NEON.30min.Gapfill.R, NEON.ERA5.HalfHourlyGapfill.R, NEON.FLUXNET.CH4FluxComparison.R, and  NEON.DriveScale.Analysis.R
-
-
-# I want a plot of the diel patterns to show what is going on... potential links between oxygenation... What can we learn by comparing these patterns to seasonal patterns?
-
-# Exploratory:
 source(fs::path(DirRepo.ch4,'workflows/NEON.DIEL.Analysis2.R'))
 source(fs::path(DirRepo.ch4,'workflows/NEON.MonthlySinkBehavior.Analysis.R'))
 source(fs::path(DirRepo.ch4,'workflows/NEON.Supplementary.ModelDriverPlots.R'))
 source(fs::path(DirRepo.ch4,'workflows/NEON.30min.Gapfill.R')) # I am not sure I need this file!
 source(fs::path(DirRepo.ch4,'workflows/NEON.ConsistencyMagnitude.Analysis.R')) # fix figure colors!
-
-
-source(fs::path(DirRepo.ch4,'workflows/NEON.DIEL.Analysis2.R'))
 source(fs::path(DirRepo.ch4,'workflows/NEON.TotalFlux.AnnualBudget.R'))
 source(fs::path(DirRepo.ch4,'workflows/NEON.DIEL.SynthesisFigure.R'))
-
-
 
 # Original Analysis:
 
 source(fs::path(DirRepo.ch4,'workflows/flow.climate.NEON.R'))
 source(fs::path(DirRepo.ch4,'workflows/flow.soilmoisture.NEON.R'))
 source(fs::path(DirRepo.ch4,'workflows/flow.parms_results.R'))
-# Visualizations and Analysis (NEON): ####
 
 
-# Sinks and Sources:
-
-
-# Variability in Q10 and Base Respiration.
-# Relationship between soil moisture and parms?
-# Merge with co2 and H2o???
-# ? Comparison to fluxnet???
