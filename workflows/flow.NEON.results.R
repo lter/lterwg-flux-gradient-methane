@@ -288,7 +288,7 @@ ggsave("FIGURES/DIEL_driver_model_evidence.png", plot = plot.DIEL.driver.evidenc
 
 # Site consistency as CH4 source, sink, or fluctuating: ####
 
-site.consistency.threshold <- 0.75
+site.consistency.threshold <- 1
 
 DIEL.site.consistency <- parms.diel %>%
   dplyr::select(SITE_ID, Date, Season, DIEL_mgC_m2_day) %>%
@@ -309,11 +309,11 @@ DIEL.site.consistency <- parms.diel %>%
   ) %>%
   mutate(
     CH4_behavior = case_when(
-      prop_source_months >= site.consistency.threshold ~ "Consistent source",
-      prop_source_months <= 1 - site.consistency.threshold ~ "Consistent sink",
+      prop_source_months >= site.consistency.threshold ~ "Weak-source",
+      prop_source_months <= 1 - site.consistency.threshold ~ "Weak-sink",
       TRUE ~ "Fluctuating"
     ),
-    CH4_behavior = factor(CH4_behavior, levels = c("Consistent sink", "Fluctuating", "Consistent source"))
+    CH4_behavior = factor(CH4_behavior, levels = c("Weak-sink", "Fluctuating", "Weak-source"))
   ) %>%
   left_join(
     parms.site %>%
@@ -377,7 +377,7 @@ plot.DIEL.site.behavior.map <- ggplot() +
     alpha = 0.8
   ) +
   theme_bw() +
-  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  scale_color_manual(values = c("Weak-sink" = "red3", "Fluctuating" = "grey35", "Weak-source" = "blue4"), na.translate = FALSE) +
   scale_size_continuous(range = c(2, 6)) +
   labs(color = "CH4 behavior", size = expression(paste("|mean CH"[4], "|")))
 
@@ -390,7 +390,7 @@ plot.DIEL.site.behavior.phase <- DIEL.site.consistency %>%
   geom_point(aes(color = CH4_behavior, size = n_months), alpha = 0.8) +
   ggrepel::geom_text_repel(aes(label = SITE_ID), size = 2.6, max.overlaps = 30) +
   theme_bw() +
-  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  scale_color_manual(values = c("Weak-sink" = "red3", "Fluctuating" = "grey35", "Weak-source" = "blue4"), na.translate = FALSE) +
   labs(
     x = "Fraction of months with CH4 source behavior",
     y = expression(paste("Mean CH"[4], " as DIEL (mg C ", m^-2, " ", day^-1, ")")),
@@ -411,7 +411,7 @@ plot.DIEL.site.behavior.drivers <- DIEL.site.consistency %>%
   geom_jitter(width = 0.15, alpha = 0.65, size = 1.8) +
   facet_wrap(~driver_label, scales = "free_y", ncol = 3) +
   theme_bw() +
-  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  scale_color_manual(values = c("Weak-sink" = "red3", "Fluctuating" = "grey35", "Weak-source" = "blue4"), na.translate = FALSE) +
   labs(x = "", y = "Site-level driver value", color = "CH4 behavior") +
   theme(
     strip.background = element_rect(fill = "transparent", color = "black"),

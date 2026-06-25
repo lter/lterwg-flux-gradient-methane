@@ -64,9 +64,9 @@ dir.create(OUTDIR, showWarnings = FALSE)
 # 1. CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
 BEHAVIOR_COLORS <- c(
-  "Consistent sink"   = "#2166AC",
+  "Weak-sink"   = "#2166AC",
   "Fluctuating"       = "#4D4D4D",
-  "Consistent source" = "#B2182B"
+  "Weak-source" = "#B2182B"
 )
 SEASON_COLORS <- c(
   Winter = "#5E81AC", Spring = "#4C9F70",
@@ -84,12 +84,12 @@ QUALITY_COLORS <- c(
   "low observed coverage"          = "#fdae61",
   "very low observed coverage"     = "#d7191c"
 )
-SOURCE_THRESHOLD <- 0.75
+SOURCE_THRESHOLD <- 1
 
 classify_behavior <- function(p) {
   case_when(
-    p >= SOURCE_THRESHOLD ~ "Consistent source",
-    p <= (1 - SOURCE_THRESHOLD) ~ "Consistent sink",
+    p >= SOURCE_THRESHOLD ~ "Weak-source",
+    p <= (1 - SOURCE_THRESHOLD) ~ "Weak-sink",
     !is.na(p) ~ "Fluctuating",
     TRUE ~ NA_character_
   )
@@ -498,25 +498,25 @@ if (!has_30min) {
 sm3 <- site_summary %>% filter(!is.na(prop_pos), !is.na(mean_total))
 
 fig3 <- ggplot(sm3, aes(prop_pos, mean_total, colour = behavior, fill = behavior)) +
-  annotate("rect", xmin = 0,    xmax = 0.25, ymin = -Inf, ymax = Inf,
-           fill = BEHAVIOR_COLORS["Consistent sink"],   alpha = 0.07) +
-  annotate("rect", xmin = 0.25, xmax = 0.75, ymin = -Inf, ymax = Inf,
+  annotate("rect", xmin = 0,    xmax = 0, ymin = -Inf, ymax = Inf,
+           fill = BEHAVIOR_COLORS["Weak-sink"],   alpha = 0.07) +
+  annotate("rect", xmin = 0,    xmax = 1, ymin = -Inf, ymax = Inf,
            fill = BEHAVIOR_COLORS["Fluctuating"],       alpha = 0.05) +
-  annotate("rect", xmin = 0.75, xmax = 1.00, ymin = -Inf, ymax = Inf,
-           fill = BEHAVIOR_COLORS["Consistent source"], alpha = 0.07) +
-  geom_vline(xintercept = c(0.25, 0.75),
+  annotate("rect", xmin = 1,    xmax = 1, ymin = -Inf, ymax = Inf,
+           fill = BEHAVIOR_COLORS["Weak-source"], alpha = 0.07) +
+  geom_vline(xintercept = c(0, 1),
              colour = "grey65", linewidth = 0.5, linetype = "dashed") +
   geom_hline(yintercept = 0,
              colour = "grey55", linewidth = 0.5, linetype = "dashed") +
   annotate("text", x = 0.125, y = Inf,
            label = "Consistent\nsink", vjust = 1.4, size = 3.0,
-           fontface = "bold", colour = BEHAVIOR_COLORS["Consistent sink"]) +
+           fontface = "bold", colour = BEHAVIOR_COLORS["Weak-sink"]) +
   annotate("text", x = 0.500, y = Inf,
            label = "Fluctuating", vjust = 1.4, size = 3.0,
            fontface = "bold", colour = BEHAVIOR_COLORS["Fluctuating"]) +
   annotate("text", x = 0.875, y = Inf,
            label = "Consistent\nsource", vjust = 1.4, size = 3.0,
-           fontface = "bold", colour = BEHAVIOR_COLORS["Consistent source"]) +
+           fontface = "bold", colour = BEHAVIOR_COLORS["Weak-source"]) +
   geom_point(shape = 21, size = 3.0, stroke = 0.4,
              colour = "white", alpha = 0.92) +
   geom_text_repel(
@@ -929,8 +929,8 @@ if (!has_soil) {
     (sum(pairs > 0) - sum(pairs < 0)) / length(pairs)
   }
 
-  # Compare "Consistent source" vs "Fluctuating" for each driver
-  src <- drivers_wide %>% filter(behavior == "Consistent source")
+  # Compare "Weak-source" vs "Fluctuating" for each driver
+  src <- drivers_wide %>% filter(behavior == "Weak-source")
   flu <- drivers_wide %>% filter(behavior == "Fluctuating")
 
   cliff_results <- imap_dfr(driver_cols, function(candidates, label) {
@@ -1028,7 +1028,7 @@ if (!has_soil) {
     ) +
     labs(
       title    = "Figure 7 — Environmental Driver Differences: Consistent Source vs Fluctuating",
-      subtitle = "Cliff's δ (positive = higher in Consistent source) · bands show effect-size thresholds",
+      subtitle = "Cliff's δ (positive = higher in Weak-source) · bands show effect-size thresholds",
       x        = "Cliff's δ effect size",
       y        = NULL
     ) +

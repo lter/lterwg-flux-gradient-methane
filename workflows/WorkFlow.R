@@ -9,9 +9,9 @@ library(sf)
 
 # -------------- Change this stuff -------------
 #DirRepo <- 'C:/Users/csturtevant/Documents/Git/lterwg-flux-gradient' # Relative or absolute path to lterwg-flux-gradient git repo on your local machine. Make sure you've pulled the latest from main!
-DirRepo.ch4 <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
+DirRepo.ch4 <-"/Users/sm3466/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
 
-DirRepo.eval <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
+DirRepo.eval <-"/Users/sm3466/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
 
 setwd(DirRepo.ch4)
 localdir <- '/Volumes/MaloneLab/Research/FluxGradient'
@@ -62,19 +62,31 @@ source(fs::path(DirRepo.ch4,'workflows/flow.TotalFlux.R'))
 
 # DIELS (NEON): ####
 source(fs::path(DirRepo.ch4,'workflows/flow.DIEL.NEON.R'))
+
 # see which DIELS are better CO2 or H2O
 
 #Explains why sites show specific patterns and how those patterns scale temporally-
 source(fs::path(DirRepo.ch4,'workflows/flow.30min.analysis.R'))  # makes files needed below
-source(fs::path(DirRepo.ch4,'workflows/NEON.ERA5.HalfHourlyGapfill.R'))
-source(fs::path(DirRepo.ch4,'workflows/NEON.FLUXNET.CH4FluxComparison.R')) # Ensure this is using the ERA 5 data for the comparisons!
+source(fs::path(DirRepo.ch4,'workflows/NEON.30min.Gapfill.R')) 
+source(fs::path(DirRepo.ch4,'workflows/NEON.ERA5.HalfHourlyGapfill.R')) # Gapfills the data
 
-# Attempts at upscalng for a global budget comparison:
-source(fs::path(DirRepo.ch4,'workflows/ERA-Upscaling.R'))
+source(fs::path(DirRepo.ch4,'workflows/flow.plots.R')) # produces figures based NEON Fluxes
+
+
+source(fs::path(DirRepo.ch4,'workflows/NEON.FLUXNET.CH4FluxComparison.R')) # Ensure this is using the ERA 5 data for the comparisons!
+## OUTPUT/CH4_flux_medians_by_source_and_behavior.csv 
+
+
+# Attempts at upscale for a global budget comparison:
+source(fs::path(DirRepo.ch4,'workflows/ERA-Upscaling.R')) # Not usig this version!
+source(fs::path(DirRepo.ch4,'workflows/NEON.DriveScale.Analysis.R')) # produces needed files
+
 source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialProbability.R')) 
 source(fs::path(DirRepo.ch4,'workflows/Download-ERA5Land-Monthly.R')) 
 source(fs::path(DirRepo.ch4,'workflows/Download-Process-MODIS-WAD2M.R')) 
 source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialUpscaling-Monthly.R')) 
+
+source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialUpscaling-Figures.R'))
 
 
 

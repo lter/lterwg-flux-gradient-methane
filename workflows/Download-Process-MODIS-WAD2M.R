@@ -92,10 +92,19 @@ read_modis_igbp <- function(hdf_file) {
 classify_modis_to_ecotype <- function(igbp) {
   # IGBP classes: 0 water; 1-5 forest; 6-7 shrubland; 8-10 savanna/grassland;
   # 11 wetlands; 12 cropland; 13 urban; 14 cropland mosaic; 15 snow/ice; 16 barren.
+  #
+  # Both barren / desert classes are assigned code 5 (Arid) so that hyper-arid
+  # cells receive sink-only treatment instead of inheriting Shrubland source
+  # propensity:
+  #   Class  7 (Open Shrublands) — covers the Sahara, Arabian Peninsula, and
+  #     Central Asian deserts (the geographically dominant desert class).
+  #   Class 16 (Barren) — pure rock/sand/tundra with essentially no vegetation.
+  # Class 6 (Closed Shrublands) stays as Shrubland (code 4) — those cells have
+  # meaningful canopy cover and NEON shrubland observations are applicable.
   subst(
     igbp,
     from = 0:16,
-    to = c(NA, 2, 2, 2, 2, 2, 4, 4, 3, 3, 3, NA, 1, NA, 1, NA, 4)
+    to = c(NA, 2, 2, 2, 2, 2, 4, 5, 3, 3, 3, NA, 1, NA, 1, NA, 5)
   )
 }
 

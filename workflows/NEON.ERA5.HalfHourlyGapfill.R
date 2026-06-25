@@ -1,5 +1,5 @@
 # ERA5-driven half-hourly total-flux CH4 gap filling for NEON sites.
-#
+#lo
 # This workflow obtains hourly ERA5 point covariates for NEON tower sites,
 # interpolates them to 30-minute timestamps, fits a total-flux GAM using ERA5
 # temperature and soil volumetric water content, and compares the resulting
@@ -24,7 +24,7 @@ model_data_file <- "OUTPUT/30min_ch4_model_data.csv"
 site_standardized_flux_file <- "OUTPUT/30min_site_standardized_flux.csv"
 daily_flux_summary_file <- "OUTPUT/NEON_scale_daily_flux_summary.csv"
 scaled_annual_budget_file <- "OUTPUT/NEON_scale_annual_budget_summary.csv"
-model_standardized_budget_file <- "OUTPUT/NON_30min_gapfill_annual_budgets.csv"
+model_standardized_budget_file <- "OUTPUT/NEON_30min_gapfill_annual_budgets.csv"
 reference_annual_category_file <- "OUTPUT/NEON_scale_annual_budget_summary.csv"
 metadata_file <- file.path(localdir, "Ameriflux_NEON field-sites.csv")
 
@@ -38,12 +38,12 @@ if (length(missing_files) > 0) {
   stop("Missing required files: ", paste(missing_files, collapse = ", "))
 }
 
-behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
+behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
 # Color convention: blue = sink (uptake), grey = fluctuating, red = source (emission)
 behavior_colors <- c(
-  "Consistent sink"   = "#2166AC",
+  "Weak-sink"   = "#2166AC",
   "Fluctuating"       = "#4D4D4D",
-  "Consistent source" = "#B2182B"
+  "Weak-source" = "#B2182B"
 )
 ecotype_colors <- c(
   "Cropland" = "#E69F00",
@@ -151,7 +151,44 @@ fetch_open_meteo_era5_site <- function(site, latitude, longitude, start_date, en
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
-if (!file.exists(era5_hourly_file)) {
+era5_cache_valid <- FALSE
+if (file.exists(era5_hourly_file)) {
+  message("Checking cached ERA5 hourly covariates: ", era5_hourly_file)
+  era5_hourly <- data.table::fread(era5_hourly_file) %>%
+    as_tibble() %>%
+    mutate(time_hour = as.POSIXct(time_hour, tz = "UTC"))
+
+  cached_start <- as.Date(min(era5_hourly$time_hour, na.rm = TRUE))
+  cached_end   <- as.Date(max(era5_hourly$time_hour, na.rm = TRUE))
+  cached_sites <- unique(era5_hourly$SITE_ID)
+  required_sites <- unique(site_metadata$SITE_ID)
+  missing_sites  <- setdiff(required_sites, cached_sites)
+
+  if (cached_start <= start_date && cached_end >= end_date && length(missing_sites) == 0) {
+    message(
+      "Cache covers ", cached_start, " to ", cached_end,
+      " for all ", length(cached_sites), " sites — skipping download."
+    )
+    era5_cache_valid <- TRUE
+  } else {
+    if (cached_start > start_date || cached_end < end_date) {
+      message(
+        "Cache date range (", cached_start, " to ", cached_end,
+        ") does not cover required range (", start_date, " to ", end_date,
+        "). Re-fetching."
+      )
+    }
+    if (length(missing_sites) > 0) {
+      message(
+        "Cache is missing ", length(missing_sites), " site(s): ",
+        paste(missing_sites, collapse = ", "), ". Re-fetching."
+      )
+    }
+    era5_hourly <- NULL
+  }
+}
+
+if (!era5_cache_valid) {
   message("Fetching ERA5 covariates from Open-Meteo Archive API for ", nrow(site_metadata), " sites.")
 
   fetch_results <- vector("list", nrow(site_metadata))
@@ -199,11 +236,6 @@ if (!file.exists(era5_hourly_file)) {
 
   era5_hourly <- bind_rows(fetch_results)
   data.table::fwrite(era5_hourly, era5_hourly_file)
-} else {
-  message("Using cached ERA5 hourly covariates: ", era5_hourly_file)
-  era5_hourly <- data.table::fread(era5_hourly_file) %>%
-    as_tibble() %>%
-    mutate(time_hour = as.POSIXct(time_hour, tz = "UTC"))
 }
 
 site_year_grid <- site_years %>%
@@ -232,7 +264,49 @@ site_year_grid <- site_years %>%
   left_join(site_metadata %>% dplyr::select(SITE_ID, EcoType), by = "SITE_ID") %>%
   mutate(EcoType = factor(EcoType))
 
-if (!file.exists(era5_halfhour_file)) {
+era5_halfhour_cache_valid <- FALSE
+if (file.exists(era5_halfhour_file)) {
+  message("Checking cached ERA5 half-hour covariates: ", era5_halfhour_file)
+  era5_halfhour <- data.table::fread(era5_halfhour_file) %>%
+    as_tibble() %>%
+    mutate(
+      time.rounded = as.POSIXct(time.rounded, tz = "UTC"),
+      Date = as.Date(Date),
+      season = factor(season, levels = c("Winter", "Spring", "Summer", "Autumn")),
+      EcoType = factor(EcoType)
+    )
+
+  cached_hh_start  <- as.Date(min(era5_halfhour$time.rounded, na.rm = TRUE))
+  cached_hh_end    <- as.Date(max(era5_halfhour$time.rounded, na.rm = TRUE))
+  cached_hh_sites  <- unique(era5_halfhour$SITE_ID)
+  required_sites   <- unique(site_metadata$SITE_ID)
+  missing_hh_sites <- setdiff(required_sites, cached_hh_sites)
+
+  if (cached_hh_start <= start_date && cached_hh_end >= end_date && length(missing_hh_sites) == 0) {
+    message(
+      "Half-hour cache covers ", cached_hh_start, " to ", cached_hh_end,
+      " for all ", length(cached_hh_sites), " sites — skipping interpolation."
+    )
+    era5_halfhour_cache_valid <- TRUE
+  } else {
+    if (cached_hh_start > start_date || cached_hh_end < end_date) {
+      message(
+        "Half-hour cache date range (", cached_hh_start, " to ", cached_hh_end,
+        ") does not cover required range (", start_date, " to ", end_date,
+        "). Re-interpolating."
+      )
+    }
+    if (length(missing_hh_sites) > 0) {
+      message(
+        "Half-hour cache is missing ", length(missing_hh_sites), " site(s): ",
+        paste(missing_hh_sites, collapse = ", "), ". Re-interpolating."
+      )
+    }
+    era5_halfhour <- NULL
+  }
+}
+
+if (!era5_halfhour_cache_valid) {
   message("Interpolating hourly ERA5 covariates to 30-minute site-year grid.")
   era5_halfhour <- site_year_grid %>%
     mutate(
@@ -269,16 +343,6 @@ if (!file.exists(era5_halfhour_file)) {
     dplyr::select(SITE_ID, Year, time.rounded, Date, month, doy, hour_num, season, EcoType, ERA5_Tair_C, ERA5_VSWC)
 
   data.table::fwrite(era5_halfhour, era5_halfhour_file)
-} else {
-  message("Using cached ERA5 half-hour covariates: ", era5_halfhour_file)
-  era5_halfhour <- data.table::fread(era5_halfhour_file) %>%
-    as_tibble() %>%
-    mutate(
-      time.rounded = as.POSIXct(time.rounded, tz = "UTC"),
-      Date = as.Date(Date),
-      season = factor(season, levels = c("Winter", "Spring", "Summer", "Autumn")),
-      EcoType = factor(EcoType)
-    )
 }
 
 gapfill_data <- era5_halfhour %>%
@@ -367,50 +431,8 @@ set.seed(20260519)
 fit_plot_data <- training_fit %>%
   slice_sample(n = min(10000, nrow(training_fit)))
 
-fit_axis_lim <- quantile(
-  abs(c(fit_plot_data$CH4_mgC_30min, fit_plot_data$fitted_CH4_mgC_30min)),
-  0.995,
-  na.rm = TRUE
-)
+write.csv(fit_plot_data, "OUTPUT/NEON_ERA5_halfhour_gapfill_fit_plot_data.csv", row.names = FALSE)
 
-plot_fit_observed <- fit_plot_data %>%
-  ggplot(aes(x = fitted_CH4_mgC_30min, y = CH4_mgC_30min)) +
-  geom_bin2d(bins = 70) +
-  geom_abline(slope = 1, intercept = 0, color = "white", linewidth = 0.9) +
-  geom_hline(yintercept = 0, color = "grey75", linetype = "dashed", linewidth = 0.5) +
-  geom_vline(xintercept = 0, color = "grey75", linetype = "dashed", linewidth = 0.5) +
-  coord_cartesian(xlim = c(-fit_axis_lim, fit_axis_lim), ylim = c(-fit_axis_lim, fit_axis_lim)) +
-  scale_fill_viridis_c(option = "magma", trans = "sqrt", name = "Count") +
-  labs(
-    title = "A. Observed vs fitted",
-    subtitle = paste0(
-      "RMSE = ", signif(fit_metrics$rmse_mgC_m2_30min, 3),
-      "; r = ", signif(fit_metrics$correlation_observed_fitted, 3)
-    ),
-    x = "Fitted CH4 flux (mg C m-2 30 min-1)",
-    y = "Observed CH4 flux (mg C m-2 30 min-1)"
-  ) +
-  theme_bw(base_size = 10) +
-  theme(plot.title = element_text(face = "bold"), panel.grid.minor = element_blank())
-
-plot_fit_residuals <- fit_plot_data %>%
-  ggplot(aes(x = fitted_CH4_mgC_30min, y = residual_CH4_mgC_30min)) +
-  geom_bin2d(bins = 70) +
-  geom_hline(yintercept = 0, color = "white", linewidth = 0.9) +
-  coord_cartesian(
-    xlim = c(-fit_axis_lim, fit_axis_lim),
-    ylim = quantile(fit_plot_data$residual_CH4_mgC_30min, c(0.005, 0.995), na.rm = TRUE)
-  ) +
-  scale_fill_viridis_c(option = "magma", trans = "sqrt", name = "Count") +
-  labs(
-    title = "B. Residuals vs fitted",
-    subtitle = paste0("Bias = ", signif(fit_metrics$bias_mgC_m2_30min, 3),
-                      "; MAE = ", signif(fit_metrics$mae_mgC_m2_30min, 3)),
-    x = "Fitted CH4 flux (mg C m-2 30 min-1)",
-    y = "Residual (observed - fitted)"
-  ) +
-  theme_bw(base_size = 10) +
-  theme(plot.title = element_text(face = "bold"), panel.grid.minor = element_blank())
 
 reference_values <- training_data %>%
   summarise(
@@ -488,68 +510,6 @@ effect_grid <- effect_grid %>%
 
 write.csv(effect_grid, "OUTPUT/NEON_ERA5_halfhour_gapfill_model_effects.csv", row.names = FALSE)
 
-plot_model_effects <- effect_grid %>%
-  ggplot(aes(x = driver_value, y = pred_CH4_mgC_30min)) +
-  geom_hline(yintercept = 0, color = "grey55", linetype = "dashed", linewidth = 0.5) +
-  geom_ribbon(aes(ymin = lower_CH4_mgC_30min, ymax = upper_CH4_mgC_30min),
-              fill = "grey35", alpha = 0.18) +
-  geom_line(color = "grey10", linewidth = 1.0) +
-  facet_wrap(~driver_label, scales = "free_x", ncol = 2) +
-  labs(
-    title = "C. Population-level model effects",
-    subtitle = "Predictions hold other covariates at typical values and exclude the site random effect; ribbons are +/- 90% model SE.",
-    x = NULL,
-    y = "Predicted CH4 flux (mg C m-2 30 min-1)"
-  ) +
-  theme_bw(base_size = 10) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    plot.subtitle = element_text(size = 8, color = "grey35"),
-    strip.background = element_rect(fill = "grey94", color = "grey40"),
-    strip.text = element_text(face = "bold", size = 8.5),
-    panel.grid.minor = element_blank()
-  )
-
-plot_residual_distribution <- fit_plot_data %>%
-  ggplot(aes(x = residual_CH4_mgC_30min)) +
-  geom_vline(xintercept = 0, color = "grey35", linetype = "dashed") +
-  geom_histogram(bins = 80, fill = "#5E81AC", color = "white", linewidth = 0.15) +
-  coord_cartesian(xlim = quantile(fit_plot_data$residual_CH4_mgC_30min, c(0.005, 0.995), na.rm = TRUE)) +
-  labs(
-    title = "D. Residual distribution",
-    x = "Residual (mg C m-2 30 min-1)",
-    y = "Training observations"
-  ) +
-  theme_bw(base_size = 10) +
-  theme(plot.title = element_text(face = "bold"), panel.grid.minor = element_blank())
-
-plot_era5_model_fit_summary <- (plot_fit_observed | plot_fit_residuals) /
-  (plot_model_effects | plot_residual_distribution) +
-  plot_layout(heights = c(1, 1.25), guides = "collect") +
-  plot_annotation(
-    title = "ERA5 Half-Hourly Gapfill GAM Fit Summary",
-    subtitle = paste0(
-      "Training rows = ", fit_metrics$n_training,
-      "; deviance explained = ", signif(summary(era5_gapfill_model)$dev.expl, 3),
-      "; adjusted R2 = ", signif(summary(era5_gapfill_model)$r.sq, 3)
-    ),
-    caption = "Observed/fitted diagnostics include the site random effect. Model-effect panels exclude the site random effect to show population-level responses."
-  ) &
-  theme(
-    plot.title = element_text(face = "bold", size = 15),
-    plot.subtitle = element_text(size = 10, color = "grey35"),
-    plot.caption = element_text(size = 8, color = "grey35"),
-    legend.position = "bottom"
-  )
-
-ggsave(
-  "FIGURES/NEON_ERA5_halfhour_gapfill_model_fit_summary.png",
-  plot_era5_model_fit_summary,
-  width = 13,
-  height = 10,
-  units = "in",
-  dpi = 300
-)
 
 
 model_site_levels <- levels(training_data$SITE_ID)
@@ -634,8 +594,8 @@ era5_mean_annual_budget <- era5_annual_budget %>%
   ) %>%
   mutate(
     era5_annual_behavior = case_when(
-      era5_prop_source_years >= 0.75 ~ "Consistent source",
-      era5_prop_source_years <= 0.25 ~ "Consistent sink",
+      era5_prop_source_years >= 1 ~ "Weak-source",
+      era5_prop_source_years <= 0 ~ "Weak-sink",
       TRUE ~ "Fluctuating"
     ),
     era5_annual_behavior = factor(era5_annual_behavior, levels = behavior_levels)
@@ -736,7 +696,7 @@ era5_all_site_flux_magnitude_summary <- era5_mean_annual_budget %>%
     annual_behavior,
     `30 min` = flux_30min_umolC_m2_s,
     Daily = flux_daily_mgC_m2_day,
-    `Annual scaled` = flux_scaled_annual_gC_m2_yr,
+    `Annual` = flux_scaled_annual_gC_m2_yr,
     `Annual ERA5` = flux_era5_annual_gC_m2_yr,
     sd_30min = flux_30min_sd_umolC_m2_s,
     sd_daily = flux_daily_sd_mgC_m2_day,
@@ -751,37 +711,37 @@ era5_all_site_flux_magnitude_summary <- era5_mean_annual_budget %>%
     scaled_annual_behavior
   ) %>%
   pivot_longer(
-    cols = c(`30 min`, Daily, `Annual scaled`, `Annual ERA5`),
+    cols = c(`30 min`, Daily, `Annual`, `Annual ERA5`),
     names_to = "scale",
     values_to = "flux_native"
   ) %>%
   mutate(
     flux_sd_native = case_when(
-      scale == "30 min" ~ sd_30min,
-      scale == "Daily" ~ sd_daily,
-      scale == "Annual scaled" ~ sd_annual_scaled,
+      scale == "30 min"      ~ sd_30min,
+      scale == "Daily"       ~ sd_daily,
+      scale == "Annual"      ~ sd_annual_scaled,
       scale == "Annual ERA5" ~ sd_annual_era5
     ),
     flux_se_native = case_when(
-      scale == "30 min" ~ se_30min,
-      scale == "Daily" ~ se_daily,
-      scale == "Annual scaled" ~ se_annual_scaled,
+      scale == "30 min"      ~ se_30min,
+      scale == "Daily"       ~ se_daily,
+      scale == "Annual"      ~ se_annual_scaled,
       scale == "Annual ERA5" ~ se_annual_era5
     ),
     flux_unit = case_when(
-      scale == "30 min" ~ "umol C m-2 s-1",
-      scale == "Daily" ~ "mg C m-2 d-1",
-      scale == "Annual scaled" ~ "g C m-2 yr-1",
+      scale == "30 min"      ~ "umol C m-2 s-1",
+      scale == "Daily"       ~ "mg C m-2 d-1",
+      scale == "Annual"      ~ "g C m-2 yr-1",
       scale == "Annual ERA5" ~ "g C m-2 yr-1"
     ),
     flux_lower_native = flux_native - flux_sd_native,
     flux_upper_native = flux_native + flux_sd_native,
-    scale = factor(scale, levels = c("30 min", "Daily", "Annual scaled", "Annual ERA5")),
+    scale = factor(scale, levels = c("30 min", "Daily", "Annual", "Annual ERA5")),
     SITE_ID_plot = factor(SITE_ID, levels = rev(era5_site_order)),
     scale_label = factor(
       paste0(scale, "\n", flux_unit),
       levels = paste0(
-        c("30 min", "Daily", "Annual scaled", "Annual ERA5"),
+        c("30 min", "Daily", "Annual", "Annual ERA5"),
         "\n",
         c("umol C m-2 s-1", "mg C m-2 d-1", "g C m-2 yr-1", "g C m-2 yr-1")
       )
@@ -852,6 +812,35 @@ era5_diel_behavior_summary <- era5_site_diel_30min %>%
     annual_behavior = factor(annual_behavior, levels = behavior_levels)
   )
 
+# Seasonal (monthly) source probability by behavior class
+era5_site_seasonal_30min <- ch4_30min %>%
+  left_join(
+    era5_mean_annual_budget %>%
+      transmute(SITE_ID = as.character(SITE_ID),
+                annual_behavior = factor(era5_annual_behavior, levels = behavior_levels)),
+    by = "SITE_ID"
+  ) %>%
+  filter(!is.na(annual_behavior), is.finite(month)) %>%
+  reframe(
+    .by = c(SITE_ID, annual_behavior, month),
+    n_30min = n(),
+    flux_umolC_m2_s = mg_c_30min_to_umol_c_s(mean(CH4_mgC_30min, na.rm = TRUE)),
+    source_probability = mean(CH4_mgC_30min > 0, na.rm = TRUE)
+  )
+
+era5_seasonal_behavior_summary <- era5_site_seasonal_30min %>%
+  reframe(
+    .by = c(annual_behavior, month),
+    n_sites = n_distinct(SITE_ID),
+    mean_source_probability = mean(source_probability, na.rm = TRUE),
+    sd_source_probability = sd(source_probability, na.rm = TRUE),
+    se_source_probability = sd_source_probability / sqrt(n_sites)
+  ) %>%
+  mutate(
+    se_source_probability = replace_na(se_source_probability, 0),
+    annual_behavior = factor(annual_behavior, levels = behavior_levels)
+  )
+
 era5_behavior_site_counts <- era5_annual_site_map_data %>%
   transmute(
     SITE_ID,
@@ -900,6 +889,11 @@ write.csv(
   row.names = FALSE
 )
 write.csv(
+  era5_seasonal_behavior_summary,
+  "OUTPUT/NEON_ERA5_seasonal_behavior_summary.csv",
+  row.names = FALSE
+)
+write.csv(
   era5_annual_behavior_counts,
   "OUTPUT/NEON_ERA5_annual_behavior_site_counts.csv",
   row.names = FALSE
@@ -933,375 +927,12 @@ budget_comparison <- budget_comparison %>%
                  sign(model_standardized_annual_budget_gC_m2_yr)
   )
 
-axis_lim <- max(
-  abs(c(budget_comparison$model_standardized_annual_budget_gC_m2_yr,
-        budget_comparison$mean_era5_gapfilled_annual_budget_gC_m2_yr,
-        budget_comparison$model_standardized_lwr_gC_m2_yr,
-        budget_comparison$model_standardized_upr_gC_m2_yr)),
-  na.rm = TRUE
-) * 1.12
-
-plot_budget_comparison <- budget_comparison %>%
-  ggplot(aes(x = model_standardized_annual_budget_gC_m2_yr,
-             y = mean_era5_gapfilled_annual_budget_gC_m2_yr,
-             color = reference_annual_behavior)) +
-  # sign-disagreement quadrant shading
-  annotate("rect", xmin = -axis_lim, xmax = 0, ymin = 0, ymax =  axis_lim,
-           fill = "#ff7043", alpha = 0.08) +
-  annotate("rect", xmin =  0, xmax =  axis_lim, ymin = -axis_lim, ymax = 0,
-           fill = "#ff7043", alpha = 0.08) +
-  annotate("text", x = -axis_lim * 0.55, y =  axis_lim * 0.75,
-           label = "Model-standardized: sink\nERA5: source", size = 3.0,
-           color = "#c62828", fontface = "italic", hjust = 0.5) +
-  annotate("text", x =  axis_lim * 0.55, y = -axis_lim * 0.75,
-           label = "Model-standardized: source\nERA5: sink", size = 3.0,
-           color = "#c62828", fontface = "italic", hjust = 0.5) +
-  geom_hline(yintercept = 0, color = "grey55", linetype = "dashed", linewidth = 0.8) +
-  geom_vline(xintercept = 0, color = "grey55", linetype = "dashed", linewidth = 0.8) +
-  # prominent 1:1 reference line
-  geom_abline(slope = 1, intercept = 0, color = "grey20", linewidth = 1.2) +
-  geom_errorbar(aes(xmin = model_standardized_lwr_gC_m2_yr, xmax = model_standardized_upr_gC_m2_yr),
-                orientation = "y", alpha = 0.30, width = 0, linewidth = 0.8) +
-  geom_point(aes(shape = sign_agree, size = sign_agree), alpha = 0.87) +
-  scale_shape_manual(values = c(`TRUE` = 16, `FALSE` = 21),
-                     labels = c(`TRUE` = "Sign agrees", `FALSE` = "Sign disagrees"),
-                     name = NULL) +
-  scale_size_manual(values = c(`TRUE` = 2.2, `FALSE` = 3.5), guide = "none") +
-  # label only sites where sign disagrees
-  ggrepel::geom_text_repel(
-    data = budget_comparison %>% filter(!sign_agree),
-    aes(label = SITE_ID), size = 2.7, max.overlaps = 30, show.legend = FALSE
-  ) +
-  scale_color_manual(values = behavior_colors, na.translate = FALSE) +
-  coord_cartesian(xlim = c(-axis_lim, axis_lim), ylim = c(-axis_lim, axis_lim)) +
-  labs(
-    title    = "ERA5 Half-Hour Gapfilled Budget vs Model-Standardized 30-Minute Budget",
-    subtitle = paste0("Spearman rho = ", signif(comparison_cor, 3),
-                      " - RMSE = ", signif(comparison_rmse, 3),
-                      " g C m-2 yr-1 - Sign agrees: ",
-                      sum(budget_comparison$sign_agree, na.rm = TRUE), " of ",
-                      nrow(budget_comparison), " sites"),
-    x        = expression(paste("Model-standardized annual budget (g C ", m^-2, " yr"^-1, ")")),
-    y        = expression(paste("ERA5 half-hour gapfilled annual budget (g C ", m^-2, " yr"^-1, ")")),
-    color    = "Reference annual class",
-    caption  = "Orange quadrants = methods disagree on sink/source sign. Bars = 95% model-standardized simulation CI."
-  ) +
-  theme_bw(base_size = 11) +
-  theme(
-    plot.title    = element_text(face = "bold"),
-    plot.subtitle = element_text(size = 9, color = "grey35"),
-    plot.caption  = element_text(size = 7.5, color = "grey40"),
-    legend.position  = "bottom",
-    panel.grid.minor = element_blank()
-  )
-
-ggsave("FIGURES/NEON_ERA5_vs_model_standardized_budget_scatter.png",
-       plot_budget_comparison, width = 9, height = 8, units = "in", dpi = 300)
 
 
-plot_budget_difference <- budget_comparison %>%
-  mutate(SITE_ID = fct_reorder(SITE_ID, budget_difference_era5_minus_model_standardized_gC_m2_yr)) %>%
-  ggplot(aes(x = budget_difference_era5_minus_model_standardized_gC_m2_yr, y = SITE_ID, fill = reference_annual_behavior)) +
-  geom_vline(xintercept = 0, color = "grey45", linetype = "dashed") +
-  geom_col(width = 0.7, alpha = 0.9) +
-  scale_fill_manual(values = behavior_colors, na.translate = FALSE) +
-  labs(
-    title = "Difference Between ERA5 Half-Hour and Model-Standardized Annual Budgets",
-    x = expression(paste("ERA5 gapfilled - model-standardized budget (g C ", m^-2, " yr"^-1, ")")),
-    y = NULL,
-    fill = "Reference annual class"
-  ) +
-  theme_bw(base_size = 10.5) +
-  theme(plot.title = element_text(face = "bold"), legend.position = "bottom", axis.text.y = element_text(size = 7))
-
-ggsave("FIGURES/NEON_ERA5_vs_model_standardized_budget_differences.png", plot_budget_difference, width = 9, height = 9, units = "in", dpi = 300)
 
 
-plot_era5_annual_class_changes <- era5_annual_class_change_matrix %>%
-  mutate(
-    tile_fill = case_when(
-      !changed & n_sites > 0 ~ "agreement",
-      changed  & n_sites > 0 ~ "changed",
-      TRUE                    ~ "empty"
-    )
-  ) %>%
-  ggplot(aes(x = era5_annual_behavior, y = reference_annual_behavior)) +
-  geom_tile(aes(fill = tile_fill), color = "white", linewidth = 1.4) +
-  geom_text(aes(label = label), fontface = "bold", size = 8, color = "grey15") +
-  scale_x_discrete(position = "top", drop = FALSE) +
-  scale_y_discrete(limits = rev(class_levels), drop = FALSE) +
-  scale_fill_manual(
-    values = c("agreement" = "#c8e6c9", "changed" = "#ffe0b2", "empty" = "grey97"),
-    labels = c("agreement" = "Unchanged class", "changed" = "Class changed",
-               "empty"     = "No sites"),
-    name   = NULL,
-    na.translate = FALSE
-  ) +
-  labs(
-    title    = "Reference Annual Behavior vs ERA5 Annual-Budget Class",
-    subtitle = "Rows: annual classes from lookup-filled daily budgets - Columns: ERA5 annual classes from source-year fraction\nAnnual source if >= 75% of years are positive; annual sink if <= 25%; otherwise fluctuating",
-    x        = "ERA5 annual-budget class",
-    y        = "Reference annual class"
-  ) +
-  theme_bw(base_size = 12) +
-  theme(
-    plot.title    = element_text(face = "bold"),
-    plot.subtitle = element_text(size = 8.5, color = "grey35"),
-    legend.position  = "bottom",
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    axis.text.x  = element_text(face = "bold", angle = 25, hjust = 0),
-    axis.text.y  = element_text(face = "bold")
-  )
-
-ggsave("FIGURES/NEON_ERA5_reference_annual_class_changes.png",
-       plot_era5_annual_class_changes, width = 7.5, height = 6.5, units = "in", dpi = 300)
-
-plot_era5_all_site_flux_magnitude <- era5_all_site_flux_magnitude_summary %>%
-  ggplot(aes(x = flux_native, y = SITE_ID_plot, color = annual_behavior, shape = EcoType)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.35) +
-  geom_errorbar(
-    aes(xmin = flux_lower_native, xmax = flux_upper_native),
-    orientation = "y",
-    width = 0.18,
-    linewidth = 0.45,
-    color = "grey35",
-    alpha = 0.65,
-    na.rm = TRUE
-  ) +
-  geom_point(size = 3.35, alpha = 0.55, stroke = 0.55) +
-  facet_grid(
-    rows = vars(annual_behavior),
-    cols = vars(scale_label),
-    scales = "free",
-    space = "free_y"
-  ) +
-  scale_color_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  theme_bw(base_size = 9.6) +
-  labs(
-    x = "Flux Magnitude",
-    y = NULL,
-    shape = "Ecosystem type",
-    title = expression(paste("NEON CH"[4]," Flux Magnitudes"))
-  ) +
-  guides(
-    color = "none",
-    shape = guide_legend(override.aes = list(size = 3.7, alpha = 1))
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "bottom",
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 11),
-    axis.text.y = element_text(size = 11),
-    axis.text.x = element_text(size = 11),
-    strip.text.x = element_text(face = "bold", size = 10, lineheight = 0.95),
-    strip.text.y = element_text(face = "bold", size = 8),
-    panel.spacing.x = unit(0.55, "lines"),
-    panel.spacing.y = unit(0.35, "lines")
-  )
-
-ggsave(
-  "FIGURES/NEON_ERA5_all_site_category_flux_magnitudes.png",
-  plot_era5_all_site_flux_magnitude,
-  width = 12.5,
-  height = 10.5,
-  units = "in",
-  dpi = 300
-)
 
 
-north_america_map <- rnaturalearth::ne_countries(
-  continent = "North America",
-  returnclass = "sf"
-)
-
-plot_era5_annual_site_map <- ggplot() +
-  geom_sf(data = north_america_map, fill = "grey94", color = "white", linewidth = 0.25) +
-  geom_point(
-    data = era5_annual_site_map_data,
-    aes(
-      x = longitude,
-      y = latitude,
-      color = annual_behavior,
-      shape = EcoType,
-      size = annual_flux_magnitude_gC_m2_yr
-    ),
-    alpha = 0.55,
-    stroke = 0.65
-  ) +
-  scale_color_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  scale_size_continuous(
-    range = c(2.4, 8),
-    breaks = scales::breaks_pretty(n = 4),
-    name = expression(paste("ERA5 Annual Flux (g C ", m^-2, " ", yr^-1, ")"))
-  ) +
-  coord_sf(xlim = c(-170, -60), ylim = c(15, 72), expand = FALSE) +
-  theme_bw(base_size = 10) +
-  labs(
-    x = NULL,
-    y = NULL,
-    color = "ERA5-Annual Behavior class",
-    shape = "Ecosystem type",
-    title = "ERA5 Annual Flux Behavior Across Sites",
-    subtitle = "Color shows ERA5 annual behavior class; symbol size shows absolute ERA5 annual flux magnitude."
-  ) +
-  guides(
-    color = guide_legend(override.aes = list(size = 4.2, alpha = 1)),
-    shape = guide_legend(override.aes = list(size = 4.2, alpha = 1))
-  ) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    legend.position = "bottom",
-    legend.box = "vertical",
-    legend.title = element_text(size = 8.8),
-    legend.text = element_text(size = 8.2),
-    panel.grid.major = element_line(color = "grey88", linewidth = 0.2)
-  )
-
-ggsave(
-  "FIGURES/NEON_ERA5_annual_site_category_map.png",
-  plot_era5_annual_site_map,
-  width = 10.5,
-  height = 8,
-  units = "in",
-  dpi = 300
-)
-
-# BEHAVIOR PATTERN FIGURE # ####
-
-annual_method_colors <- c(
-  "Scaled annual" = "#7F7F7F",
-  "ERA5 annual" = "#009E73"
-)
-
-plot_era5_annual_method_boxplots <- era5_annual_method_flux_summary %>% filter(annual_method ==  "ERA5 annual") %>% 
-  ggplot(aes(x = annual_behavior, y = annual_flux_gC_m2_yr, fill = annual_behavior, col = annual_behavior)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey55") +
-  geom_boxplot(
-    outlier.shape = NA,
-    width = 0.62,
-    alpha=0.5,
-    position = position_dodge(width = 0.72)
-  ) +
-  geom_point(
-    aes(group = annual_method,col=annual_behavior),
-    position = position_jitterdodge(jitter.width = 0.12, dodge.width = 0.72, seed = 20260522),
-    size = 2.1,
-    alpha = 0.55,
-    stroke = 0.35
-  ) +
-  scale_fill_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  scale_color_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  theme_bw(base_size = 12) +
-  labs(
-    x = "ERA5 annual class",
-    y = expression(paste("Annual CH"[4], " flux (g C ", m^-2, " ", yr^-1, ")")),
-    title = "A. Annual Flux Magnitude by Behavior Class"
-  ) +
-  guides(fill = guide_legend(nrow = 1, order = 1, override.aes = list(alpha = 1))) +
-  theme(
-    plot.title = element_text(face = "bold", size = 12),
-    axis.text.x = element_text(angle = 20, hjust = 1),
-    legend.position = "none",
-    legend.box = "vertical"
-    
-  )
-
-plot_era5_diel_flux <- era5_diel_behavior_summary %>%
-  ggplot(aes(x = hour_num, y = mean_flux_umolC_m2_s, color = annual_behavior, fill = annual_behavior)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey55") +
-  geom_ribbon(
-    aes(
-      ymin = mean_flux_umolC_m2_s - se_flux_umolC_m2_s,
-      ymax = mean_flux_umolC_m2_s + se_flux_umolC_m2_s
-    ),
-    color = NA,
-    alpha = 0.16
-  ) +
-  geom_line(linewidth = 0.9) +
-  scale_color_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  scale_fill_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  scale_x_continuous(breaks = seq(0, 24, by = 6), limits = c(0, 23.5)) +
-  theme_bw(base_size = 10) +
-  labs(
-    x = "Hour of day",
-    y = expression(paste("30-min CH"[4], " flux (", mu, "mol C ", m^-2, " ", s^-1, ")")),
-    color = "Behavior Class",
-    title = "C. Diel Flux Pattern"
-  ) +
-  guides(fill = "none", color = guide_legend(nrow = 1, order = 2, override.aes = list(linewidth = 1.2))) +
-  theme(
-    legend.position = "none",
-    legend.box = "vertical",
-    plot.title = element_text(face = "bold", size = 12)
-  )
-
-plot_era5_diel_source_probability <- era5_diel_behavior_summary %>%
-  ggplot(aes(x = hour_num, y = mean_source_probability, color = annual_behavior, fill = annual_behavior)) +
-  geom_ribbon(
-    aes(
-      ymin = pmax(0, mean_source_probability - se_source_probability),
-      ymax = pmin(1, mean_source_probability + se_source_probability)
-    ),
-    color = NA,
-    alpha = 0.16
-  ) +
-  geom_line(linewidth = 0.9) +
-  scale_color_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  scale_fill_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  scale_x_continuous(breaks = seq(0, 24, by = 6), limits = c(0, 23.5)) +
-  scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +
-  theme_bw(base_size = 12) +
-  labs(
-    x = "Hour of day",
-    y = "Probability of positive flux",
-    color = "Behavior Class",
-    title = "D. Diel source probability"
-  ) +
-  guides(fill = "none", color = guide_legend(nrow = 1, order = 2, override.aes = list(linewidth = 1.2))) +
-  theme(
-    legend.position = "none",
-    legend.box = "vertical",
-    plot.title = element_text(face = "bold", size = 12)
-  )
-
-plot_era5_annual_behavior_counts <- era5_annual_behavior_counts %>%
-  ggplot(aes(x = n_sites, y = fct_rev(annual_behavior), fill = annual_behavior)) +
-  geom_col(width = 0.68, color = "grey30", linewidth = 0.25) +
-  geom_text(aes(label = n_sites), hjust = -0.25, size = 3.1) +
-  scale_fill_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
-  scale_x_continuous(expand = expansion(mult = c(0, 0.16)), breaks = scales::breaks_width(5)) +
-  theme_bw(base_size = 12) +
-  labs(
-    x = "Number of sites",
-    y = NULL,
-    title = "B. Sites per ERA5 annual class"
-  ) +
-  guides(fill = "none") +
-  theme(
-    plot.title = element_text(face = "bold", size = 12),
-    axis.text.y = element_text(size = 8.7)
-  )
-
-
-library(ggpubr)
-
-plot_era5_flux_pattern_panel <- ggarrange( plot_era5_annual_method_boxplots,
-                                           plot_era5_annual_behavior_counts,
-                                           plot_era5_diel_flux , plot_era5_diel_source_probability,
-                                           ncol=2, nrow=2 ) %>%  annotate_figure(
-                top = text_grob("Flux Patterns By ERA5 Annual Behavior Class", 
-                                color = "black", face = "bold", size = 14))
-
-ggsave(
-  "FIGURES/NEON_ERA5_flux_pattern_diel_behavior_panel.png",
-  plot_era5_flux_pattern_panel,
-  width = 10,
-  height = 8,
-  units = "in",
-  dpi = 300
-)
 
 
 top_difference_lines <- budget_comparison %>%
@@ -1320,28 +951,6 @@ top_difference_lines <- budget_comparison %>%
   pull(line)
 
 
-plot_era5_annual_behavior_ecotypes <- era5_annual_behavior_ecotype_counts %>%
-  ggplot(aes(x = n_sites, y = fct_rev(annual_behavior), fill = EcoType)) +
-  geom_col(width = 0.68, color = "white", linewidth = 0.2) +
-  scale_fill_manual(values = ecotype_colors, drop = FALSE, na.translate = FALSE) +
-  scale_x_continuous(expand = expansion(mult = c(0, 0.04)), breaks = scales::breaks_width(5)) +
-  theme_bw(base_size = 10) +
-  labs(
-    x = "Number of sites",
-    y = NULL,
-    fill = "Ecosystem type",
-    title = "By ecosystem type"
-  ) +
-  guides(fill = guide_legend(nrow = 1, order = 3, override.aes = list(alpha = 1))) +
-  theme(
-    plot.title = element_text(face = "bold", size = 10),
-    axis.text.y = element_blank(),
-    axis.ticks.y = element_blank(),
-    legend.position = "bottom",
-    legend.box = "vertical",
-    legend.title = element_text(size = 8.5),
-    legend.text = element_text(size = 8)
-  )
 
 
 
@@ -1390,7 +999,7 @@ writeLines(
     "## Reference Annual vs ERA5 Annual-Budget Class",
     "- Reference annual classes are from lookup-filled daily annual budgets produced by `flow.30min.analysis.R`.",
     "- ERA5 annual class is based on the fraction of gapfilled site-years with a positive annual budget.",
-    "- Annual source: at least 75% positive years; annual sink: no more than 25% positive years; otherwise fluctuating.",
+    "- Weak-source: 100% of years positive; Weak-sink: 0% positive years; otherwise Fluctuating.",
     "### ERA5 Annual-Budget Behavior Counts",
     era5_annual_behavior_counts,
     "### Reference-vs-ERA5 Class Changes",
@@ -1422,7 +1031,7 @@ writeLines(
     "- `FIGURES/NEON_ERA5_reference_annual_class_changes.png`",
     "- `FIGURES/NEON_ERA5_all_site_category_flux_magnitudes.png`",
     "- `FIGURES/NEON_ERA5_annual_site_category_map.png`",
-    "- `FIGURES/NEON_ERA5_flux_pattern_diel_behavior_panel.png`",
+    "- `FIGURES/NEON_ERA5_flux_pattern_diel_behavior_panel.png`"
   ),
   "OUTPUT/NEON_ERA5_halfhour_gapfill_results.md"
 )

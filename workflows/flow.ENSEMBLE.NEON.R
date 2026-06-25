@@ -14,7 +14,6 @@ SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE <- list()
 for( site in site.list){
   print( site)
   
-  VAL_CGF_RSHP_sum_site <- NEON_RSHP_EVAL %>% filter( Site == site)
   VAL_RSHP_sum_site <- NEON_RSHP_EVAL %>% filter( Site == site)
 
   
@@ -28,10 +27,9 @@ for( site in site.list){
              TRUE ~ "Autumn"),
            hour = format(timeEndA.local,'%H'),
            count= case_when( is.na(FG_mean) == FALSE ~ 1, TRUE ~ 0),
-           FG_mean_RSHP = case_when(RSHP.CO2 == '1' ~ FG_mean, 
-                                    RSHP.H2O == '1' ~ FG_mean,
+           FG_mean_RSHP = case_when(RSHP.CO2 == '1' |RSHP.H2O == '1' ~ FG_mean,
                                     TRUE ~ NA)) %>% 
-    distinct  %>% 
+    distinct()  %>% 
     mutate( time.rounded = timeEndA.local %>% round_date( unit = "30 minutes") ) %>%
     reframe( .by= c(time.rounded), 
              FG_ENSEMBLE_RSHP= mean(FG_mean_RSHP, na.rm=T),
@@ -48,9 +46,8 @@ for( site in site.list){
 }
 
 SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE # filtered for RSHP
+
 # ENSEMBLE:
-
-
 save( SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE ,file=fs::path(localdir.ch4 ,paste0("SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE.Rdata")))
 
 googledrive::drive_upload(media = fs::path(localdir.ch4, paste0("SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE.Rdata")), overwrite = T, path = drive_url)

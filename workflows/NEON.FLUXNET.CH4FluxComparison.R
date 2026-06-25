@@ -9,17 +9,30 @@
 library(tidyverse)
 library(ggplot2)
 library(scales)
+library(readxl)
+library(patchwork)
 
 localdir.ch4 <- Sys.getenv(
   "LOCALDIR_CH4",
   unset = "/Volumes/MaloneLab/Research/FluxGradient/Methane"
 )
+localdir <- Sys.getenv(
+  "LOCALDIR_FLUXGRADIENT",
+  unset = "/Volumes/MaloneLab/Research/FluxGradient"
+)
+localdir.smud <- Sys.getenv(
+  "LOCALDIR_SMUD",
+  unset = "/Volumes/MaloneLab/Research/SMUD"
+)
 if (dir.exists(localdir.ch4)) {
   setwd(localdir.ch4)
 }
 
-dir.create("OUTPUT", showWarnings = FALSE)
-dir.create("FIGURES", showWarnings = FALSE)
+message("Working directory: ", getwd())
+if (!dir.exists("OUTPUT"))  dir.create("OUTPUT",  recursive = TRUE)
+if (!dir.exists("FIGURES")) dir.create("FIGURES", recursive = TRUE)
+message("OUTPUT writable: ",  file.access("OUTPUT",  mode = 2) == 0)
+message("FIGURES writable: ", file.access("FIGURES", mode = 2) == 0)
 
 site_behavior_file <- "OUTPUT/30min_site_behavior.csv"
 era5_annual_budget_file <- "OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv"
@@ -42,19 +55,24 @@ if (!file.exists(era5_mean_annual_budget_file)) {
   )
 }
 
-behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
+behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
+behavior_labels <- c(
+  "Weak-sink"   = "Weak sink",
+  "Fluctuating" = "Fluctuating",
+  "Weak-source" = "Weak source"
+)
 behavior_colors <- c(
-  "Consistent sink" = "#2166AC",
+  "Weak-sink"   = "#2166AC",
   "Fluctuating" = "grey35",
-  "Consistent source" = "#B2182B"
+  "Weak-source" = "#B2182B"
 )
 
-base_plot_size <- 18
-panel_title_size <- 21
-axis_title_size <- 19
-axis_text_size <- 15
-legend_text_size <- 17
-legend_title_size <- 18
+base_plot_size <- 11
+panel_title_size <- 14
+axis_title_size <- 12
+axis_text_size <- 10
+legend_text_size <- 10
+legend_title_size <- 11
 
 # Annual mean fluxes and SD from FLUXNET-CH4 ecosystem classes.
 # Units in the source are g C m-2 yr-1.
@@ -146,13 +164,324 @@ soil_chamber_reference <- tribble(
     source_type = "Soil chamber literature"
   )
 
+nmol_ch4_s_to_mg_c_day <- 12.011e-6 * 86400
+umol_ch4_s_to_mg_c_day <- 12.011e-3 * 86400
+min_non_fluxnet_obs_per_year <- 100
+
+summarise_non_fluxnet_tower_years <- function() {
+  validation_dir <- file.path(localdir, "Validation_Sites")
+  meta_file <- file.path(localdir, "metadata_validation.csv")
+
+  site_metadata <- if (file.exists(meta_file)) {
+    read.csv(meta_file, check.names = FALSE) %>%
+      transmute(
+        site_id = SITE_ID,
+        latitude = suppressWarnings(as.numeric(LATITUDE)),
+        longitude = suppressWarnings(as.numeric(LONGITUDE)),
+        igbp = IGBP
+      )
+  } else {
+    tibble(site_id = character(), latitude = numeric(), longitude = numeric(), igbp = character())
+  }
+
+  tower_metadata <- tribble(
+    ~site_id, ~ecosystem_class, ~location, ~reference_id, ~full_reference, ~flux_units_original,
+    "SE-Sto", "Subarctic mire", "Stordalen Mire, Abisko, Sweden", "Lakomiec et al. 2021", "Lakomiec, P., Holst, J., Friborg, T., Crill, P., Rakos, N., Kljun, N., Olsson, P.-O., Eklundh, L., Persson, A., and Rinne, J. (2021). Field-scale CH4 emission at a subarctic mire with heterogeneous permafrost thaw status. Biogeosciences, 18, 5811-5830. https://doi.org/10.5194/bg-18-5811-2021", "umol CH4 m-2 s-1",
+    "SE-Svb", "Managed boreal forest", "Svartberget, Krycklan Catchment, Sweden", "Chi et al. 2020", "Chi, J., Nilsson, M. B., Laudon, H., Lindroth, A., Wallerman, J., Fransson, J. E. S., Kljun, N., Lundmark, T., Ottosson Lofvenius, M., and Peichl, M. (2020). The Net Landscape Carbon Balance-Integrating terrestrial and aquatic carbon fluxes in a managed boreal forest landscape in Sweden. Global Change Biology, 26, 2353-2367. https://doi.org/10.1111/gcb.14983", "nmol CH4 m-2 s-1",
+    "US-Uaf", "Poorly drained black spruce forest over permafrost", "University of Alaska Fairbanks, Alaska, USA", "Iwata et al. 2015", "Iwata, H., Harazono, Y., Ueyama, M., Sakabe, A., Nagano, H., Kosugi, Y., Takahashi, K., and Kim, Y. (2015). Methane exchange in a poorly-drained black spruce forest over permafrost observed using the eddy covariance technique. Agricultural and Forest Meteorology, 214-215, 157-168. https://doi.org/10.1016/j.agrformet.2015.08.252", "nmol CH4 m-2 s-1"
+  ) %>%
+    left_join(site_metadata, by = "site_id")
+
+  tower_years <- list()
+
+  se_sto_file <- file.path(validation_dir, "SE-Sto", "SE-Sto_gas_fluxes_30min.csv")
+  if (file.exists(se_sto_file)) {
+    tower_years[["SE-Sto"]] <- read.csv(se_sto_file, check.names = TRUE) %>%
+      transmute(
+        site_id = "SE-Sto",
+        timestamp = as.POSIXct(
+          paste(substr(as.character(date), 1, 10), as.character(time)),
+          format = "%Y-%m-%d %H:%M:%S",
+          tz = "UTC"
+        ),
+        flux_original = suppressWarnings(as.numeric(Fch4_1_1_1)),
+        flux_daily_mgC_m2_day = flux_original * umol_ch4_s_to_mg_c_day
+      )
+  }
+
+  se_svb_file <- file.path(validation_dir, "SE-Svb", "CH4_SE_SVB_FLUX+PROFILE_2019.csv")
+  if (file.exists(se_svb_file)) {
+    tower_years[["SE-Svb"]] <- read.csv(se_svb_file, check.names = TRUE) %>%
+      transmute(
+        site_id = "SE-Svb",
+        timestamp = as.POSIXct(timestamp, format = "%d-%b-%Y %H:%M:%S", tz = "UTC"),
+        flux_original = suppressWarnings(as.numeric(ch4_flux_nmolm2s_85m)),
+        flux_daily_mgC_m2_day = flux_original * nmol_ch4_s_to_mg_c_day
+      )
+  }
+
+  us_uaf_file <- file.path(validation_dir, "US-Uaf", "US-Uaf CH4_concentration.csv")
+  if (file.exists(us_uaf_file)) {
+    tower_years[["US-Uaf"]] <- read.csv(us_uaf_file, check.names = TRUE) %>%
+      transmute(
+        site_id = "US-Uaf",
+        timestamp = as.POSIXct(Datetime, format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
+        flux_original = suppressWarnings(as.numeric(CH4.flux)),
+        flux_daily_mgC_m2_day = flux_original * nmol_ch4_s_to_mg_c_day
+      )
+  }
+
+  if (length(tower_years) == 0) {
+    return(tibble())
+  }
+
+  bind_rows(tower_years) %>%
+    filter(is.finite(flux_daily_mgC_m2_day), !is.na(timestamp)) %>%
+    mutate(Year = as.integer(format(timestamp, "%Y"))) %>%
+    reframe(
+      .by = c(site_id, Year),
+      n_observations = dplyr::n(),
+      daily_mgC_m2_day = mean(flux_daily_mgC_m2_day, na.rm = TRUE),
+      daily_median_mgC_m2_day = median(flux_daily_mgC_m2_day, na.rm = TRUE)
+    ) %>%
+    filter(n_observations >= min_non_fluxnet_obs_per_year) %>%
+    left_join(tower_metadata, by = "site_id")
+}
+
+non_fluxnet_tower_years <- summarise_non_fluxnet_tower_years()
+
+non_fluxnet_tower_reference <- non_fluxnet_tower_years %>%
+  reframe(
+    .by = c(
+      site_id, ecosystem_class, location, latitude, longitude, igbp,
+      reference_id, full_reference, flux_units_original
+    ),
+    comparison_group = "Towers outside FLUXNET-CH4",
+    CH4_behavior = "Weak-source",
+    annual_gC_m2_yr = median(daily_mgC_m2_day, na.rm = TRUE) * 365 / 1000,
+    annual_sd_gC_m2_yr = sd(daily_mgC_m2_day, na.rm = TRUE) * 365 / 1000,
+    daily_low_mgC_m2_day = quantile(daily_mgC_m2_day, 0.25, na.rm = TRUE),
+    daily_high_mgC_m2_day = quantile(daily_mgC_m2_day, 0.75, na.rm = TRUE),
+    daily_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE),
+    n_sites = 1L,
+    n_site_years = dplyr::n(),
+    n_observations = sum(n_observations, na.rm = TRUE),
+    measurement_years = paste(range(Year, na.rm = TRUE), collapse = "-"),
+    source_type = "Tower literature outside FLUXNET-CH4"
+  )
+
+additional_draft_tower_reference <- tribble(
+  ~comparison_group, ~site_id, ~ecosystem_class, ~location, ~latitude, ~longitude, ~igbp, ~measurement_years, ~daily_mgC_m2_day, ~daily_low_mgC_m2_day, ~daily_high_mgC_m2_day, ~n_sites, ~n_site_years, ~reference_id, ~full_reference, ~flux_units_original, ~conversion_note, ~CH4_behavior,
+  "Towers outside FLUXNET-CH4", "US-Blo-literature", "Ponderosa pine plantation", "Blodgett Forest, Sierra Nevada, California, USA", 38.90, -120.63, "ENF", "2007", -2.5 * 12 / 16, -2.5 * 12 / 16, -2.5 * 12 / 16, 1L, NA_integer_, "Smeets et al. 2009", "Smeets, C. J. P. P., Holzinger, R., Vigano, I., Goldstein, A. H., and Rockmann, T. (2009). Eddy covariance methane measurements at a Ponderosa pine plantation in California. Atmospheric Chemistry and Physics, 9, 8365-8375. https://doi.org/10.5194/acp-9-8365-2009", "mg CH4 m-2 d-1", "Daily mean whole-period downward CH4 flux of 2.5 mg CH4 m-2 d-1 converted as -2.5 * 12/16 = mg C m-2 d-1.", "Weak-sink",
+  "Towers outside FLUXNET-CH4", "SE-Nor-literature", "Boreal mixed pine-spruce forest", "Norunda research station, central Sweden", 60 + 5 / 60, 17 + 29 / 60, "MF", "2010-2011", mean(c(1.48, 4.57)) * umol_ch4_s_to_mg_c_day / 3600, 1.48 * umol_ch4_s_to_mg_c_day / 3600, 4.57 * umol_ch4_s_to_mg_c_day / 3600, 1L, NA_integer_, "Sundqvist et al. 2015", "Sundqvist, E., Molder, M., Crill, P., Kljun, N., and Lindroth, A. (2015). Methane exchange in a boreal forest estimated by gradient method. Tellus B: Chemical and Physical Meteorology, 67, 26688. https://doi.org/10.3402/tellusb.v67.26688", "umol CH4 m-2 h-1", "Mean tower-method emissions of 1.48-4.57 umol CH4 m-2 h-1 converted to mg C m-2 d-1 with umol CH4 * 12.011e-3 * 24.", "Weak-source",
+  "Towers outside FLUXNET-CH4", "CA-Hal-literature", "Temperate mixed forest", "Haliburton Forest and Wildlife Reserve, central Ontario, Canada", 45 + 17 / 60 + 11 / 3600, -(78 + 32 / 60 + 19 / 3600), "MF", "2011", -2.7 * nmol_ch4_s_to_mg_c_day, -(2.7 + 0.13) * nmol_ch4_s_to_mg_c_day, -(2.7 - 0.13) * nmol_ch4_s_to_mg_c_day, 1L, NA_integer_, "Wang et al. 2013", "Wang, J. M., Murphy, J. G., Geddes, J. A., Winsborough, C. L., Basiliko, N., and Thomas, S. C. (2013). Methane fluxes measured by eddy covariance and static chamber techniques at a temperate forest in central Ontario, Canada. Biogeosciences, 10, 4371-4382. https://doi.org/10.5194/bg-10-4371-2013", "nmol CH4 m-2 s-1", "Average EC uptake flux of -2.7 +/- 0.13 nmol CH4 m-2 s-1 converted with nmol CH4 * 12.011e-6 * 86400.", "Weak-sink"
+) %>%
+  mutate(
+    annual_gC_m2_yr = daily_mgC_m2_day * 365 / 1000,
+    annual_sd_gC_m2_yr = NA_real_,
+    n_observations = NA_integer_,
+    source_type = "Tower literature outside FLUXNET-CH4"
+  )
+
+additional_draft_chamber_reference <- tribble(
+  ~comparison_group, ~site_id, ~ecosystem_class, ~location, ~latitude, ~longitude, ~igbp, ~measurement_years, ~daily_mgC_m2_day, ~daily_low_mgC_m2_day, ~daily_high_mgC_m2_day, ~n_sites, ~n_site_years, ~reference_id, ~full_reference, ~flux_units_original, ~conversion_note,
+  "Published soil chamber", "SE-Nor-chambers", "Boreal forest soil chambers", "Norunda research station, central Sweden", 60 + 5 / 60, 17 + 29 / 60, "MF", "2010", -10 * umol_ch4_s_to_mg_c_day / 3600, -10 * umol_ch4_s_to_mg_c_day / 3600, -10 * umol_ch4_s_to_mg_c_day / 3600, 1L, NA_integer_, "Sundqvist et al. 2015", "Sundqvist, E., Molder, M., Crill, P., Kljun, N., and Lindroth, A. (2015). Methane exchange in a boreal forest estimated by gradient method. Tellus B: Chemical and Physical Meteorology, 67, 26688. https://doi.org/10.3402/tellusb.v67.26688", "umol CH4 m-2 h-1", "Soil chamber uptake of around -10 umol CH4 m-2 h-1 converted to mg C m-2 d-1 with umol CH4 * 12.011e-3 * 24."
+) %>%
+  mutate(
+    annual_gC_m2_yr = daily_mgC_m2_day * 365 / 1000,
+    annual_sd_gC_m2_yr = NA_real_,
+    n_observations = NA_integer_,
+    CH4_behavior = NA_character_,
+    source_type = "Soil chamber literature"
+  )
+
+# === SMUD Global CH4 Compilation ===
+# Source: Studies_and_Fluxes_cleaned.xlsx (Malone Lab, /Volumes/MaloneLab/Research/SMUD)
+# Annual column is already in mg C m-2 d-1 (daily mean rates).
+# Groffman 2009 and Striegl 1992 are excluded because numeric values from those papers
+# are already hard-coded in soil_chamber_reference above, preventing double-counting.
+smud_duplicate_authors <- c("Groffman", "Striegl")
+
+classify_smud_behavior <- function(flux_daily) {
+  case_when(
+    flux_daily < -0.05 ~ "Weak-sink",
+    flux_daily >  0.05 ~ "Weak-source",
+    TRUE               ~ "Fluctuating"
+  )
+}
+
+map_smud_ecosystem <- function(ecosystem) {
+  case_when(
+    ecosystem %in% c("Forest", "Rainforest", "Woodland") ~ "Forest",
+    ecosystem %in% c("Grassland", "Savanna")             ~ "Grassland/Savanna",
+    ecosystem %in% c("Shrub", "Shrubland")               ~ "Shrubland",
+    ecosystem == "Agriculture"                            ~ "Cropland",
+    ecosystem == "Tundra"                                 ~ "Tundra",
+    ecosystem %in% c("Desert", "Bare")                   ~ "Upland/Desert",
+    ecosystem == "Wetland"                                ~ "Wetland",
+    ecosystem == "Urban"                                  ~ "Urban",
+    TRUE                                                  ~ "Other"
+  )
+}
+
+smud_file <- file.path(localdir.smud, "Studies_and_Fluxes_cleaned.xlsx")
+
+smud_raw <- if (file.exists(smud_file)) {
+  read_xlsx(smud_file, sheet = "Sheet1") %>%
+    filter(
+      !is.na(Annual),
+      is.finite(Annual),
+      !str_detect(coalesce(Paper_author, ""), paste(smud_duplicate_authors, collapse = "|"))
+    ) %>%
+    mutate(
+      ecosystem_group = map_smud_ecosystem(Ecosystem),
+      CH4_behavior    = classify_smud_behavior(Annual),
+      is_ec           = str_detect(coalesce(Flux_method, ""), "Eddy covariance"),
+      study_id        = paste0(Paper_author, " ", Paper_year)
+    ) %>%
+    filter(ecosystem_group != "Other")
+} else {
+  warning("SMUD file not found: ", smud_file, ". SMUD data will not be included.")
+  tibble()
+}
+
+smud_ec_reference <- if (nrow(smud_raw) > 0) {
+  smud_raw %>%
+    filter(is_ec) %>%
+    group_by(ecosystem_group) %>%
+    summarise(
+      comparison_group      = "SMUD global compilation (EC)",
+      ecosystem_class       = paste0("SMUD ", first(ecosystem_group), " EC"),
+      n_sites               = n_distinct(study_id),
+      n_site_years          = n(),
+      daily_mgC_m2_day      = median(Annual, na.rm = TRUE),
+      daily_low_mgC_m2_day  = quantile(Annual, 0.25, na.rm = TRUE),
+      daily_high_mgC_m2_day = quantile(Annual, 0.75, na.rm = TRUE),
+      annual_sd_gC_m2_yr    = sd(Annual, na.rm = TRUE) * 365 / 1000,
+      latitude              = median(Latitude, na.rm = TRUE),
+      longitude             = median(Longitude, na.rm = TRUE),
+      measurement_years     = paste(range(Paper_year, na.rm = TRUE), collapse = "-"),
+      .groups               = "drop"
+    ) %>%
+    mutate(
+      CH4_behavior      = classify_smud_behavior(daily_mgC_m2_day),
+      annual_gC_m2_yr   = daily_mgC_m2_day * 365 / 1000,
+      site_id           = NA_character_,
+      location          = NA_character_,
+      igbp              = NA_character_,
+      n_observations    = NA_integer_,
+      flux_units_original = "mg C m-2 d-1 (pre-converted in SMUD compilation)",
+      full_reference    = "SMUD global CH4 compilation: Studies_and_Fluxes_cleaned.xlsx, Malone Lab",
+      reference_id      = "SMUD global compilation (Studies_and_Fluxes_cleaned.xlsx)",
+      source_type       = "SMUD tower (EC)"
+    )
+} else {
+  tibble()
+}
+
+smud_chamber_reference <- if (nrow(smud_raw) > 0) {
+  smud_raw %>%
+    filter(!is_ec) %>%
+    group_by(ecosystem_group) %>%
+    summarise(
+      comparison_group      = "SMUD global compilation (chambers)",
+      ecosystem_class       = paste0("SMUD ", first(ecosystem_group), " chambers"),
+      n_sites               = n_distinct(study_id),
+      n_site_years          = n(),
+      daily_mgC_m2_day      = median(Annual, na.rm = TRUE),
+      daily_low_mgC_m2_day  = quantile(Annual, 0.25, na.rm = TRUE),
+      daily_high_mgC_m2_day = quantile(Annual, 0.75, na.rm = TRUE),
+      annual_sd_gC_m2_yr    = sd(Annual, na.rm = TRUE) * 365 / 1000,
+      latitude              = median(Latitude, na.rm = TRUE),
+      longitude             = median(Longitude, na.rm = TRUE),
+      measurement_years     = paste(range(Paper_year, na.rm = TRUE), collapse = "-"),
+      .groups               = "drop"
+    ) %>%
+    mutate(
+      CH4_behavior      = classify_smud_behavior(daily_mgC_m2_day),
+      annual_gC_m2_yr   = daily_mgC_m2_day * 365 / 1000,
+      site_id           = NA_character_,
+      location          = NA_character_,
+      igbp              = NA_character_,
+      n_observations    = NA_integer_,
+      flux_units_original = "mg C m-2 d-1 (pre-converted in SMUD compilation)",
+      full_reference    = "SMUD global CH4 compilation: Studies_and_Fluxes_cleaned.xlsx, Malone Lab",
+      reference_id      = "SMUD global compilation (Studies_and_Fluxes_cleaned.xlsx)",
+      source_type       = "SMUD soil chamber"
+    )
+} else {
+  tibble()
+}
+
+if (nrow(smud_raw) > 0) {
+  message(sprintf(
+    "SMUD loaded: %d EC rows in %d ecosystem groups; %d chamber rows in %d ecosystem groups.",
+    nrow(smud_raw %>% filter(is_ec)),    nrow(smud_ec_reference),
+    nrow(smud_raw %>% filter(!is_ec)),   nrow(smud_chamber_reference)
+  ))
+}
+
+draft_candidate_sources <- tribble(
+  ~source_type, ~reference_id, ~ecosystem_class, ~location, ~measurement_type, ~status, ~doi_or_url, ~notes,
+  "Tower/EC/gradient candidate", "Shoemaker et al. 2014", "Temperate forest", "Harvard Forest, Massachusetts, USA", "Tower/ecosystem-scale CH4", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1002/2013GL058691", "Publisher PDF was blocked by browser challenge during this pass.",
+  "Tower/EC/gradient candidate", "Hill and Vargas 2022", "Temperate tidal salt marsh", "Delaware, USA", "Plot and ecosystem CH4", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1029/2022JG006943", "Useful wetland/salt-marsh benchmark if not already represented by FLUXNET-CH4.",
+  "Tower/EC/gradient candidate", "Werner et al. 2003", "Mixed temperate/boreal lowland and wetland forest", "Northern Wisconsin, USA", "Tall-tower CH4", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1046/j.1365-2486.2003.00670.x", "Regional/tall-tower footprint rather than site-scale EC.",
+  "Tower/EC/gradient candidate", "Schrier-Uijl et al. 2010", "Peat grassland", "Netherlands", "EC and chambers", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1016/j.agrformet.2010.05.005", "Potential bridge between chamber and EC estimates.",
+  "Tower/EC/gradient candidate", "Zhang et al. 2012", "Permafrost ecosystem", "Qinghai-Tibetan Plateau, China", "Chambers scaled to EC", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1111/j.1365-2486.2011.02587.x", "Potential tundra/permafrost benchmark.",
+  "Tower/EC/gradient candidate", "Yu et al. 2013", "Alpine wetland", "Tibetan Plateau, China", "EC and manual/automated chambers", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1016/j.envpol.2013.06.018", "Potential wetland benchmark.",
+  "Tower/EC/gradient candidate", "Zhao et al. 2019", "Small ponds", "Boreal/temperate ponds", "Flux-gradient and EC methods", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1016/j.agrformet.2019.05.032", "Aquatic source; may belong in a pond/lake group rather than tower forest comparison.",
+  "Chamber/soil candidate", "Keller et al. 1983", "Forest soils", NA_character_, "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "Older chamber benchmark.",
+  "Chamber/soil candidate", "Keller et al. 1990", "Tropical/agricultural development soils", "Central Panama", "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "Land-use contrast benchmark.",
+  "Chamber/soil candidate", "Steudler et al. 1989", "Temperate forest soils", NA_character_, "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "N-fertilization/forest soil uptake benchmark.",
+  "Chamber/soil candidate", "Yavitt et al. 1990", "Temperate forest soils", NA_character_, "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "Site-level forest soil uptake/source contrast.",
+  "Chamber/soil candidate", "Yavitt et al. 1995", "Northern hardwood forest", NA_character_, "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "Forest ecosystem methane dynamics.",
+  "Chamber/soil candidate", "Crill 1991", "Temperate woodland soil", NA_character_, "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "Soil CH4 uptake benchmark.",
+  "Chamber/soil candidate", "Whalen et al. 1991", "Taiga soils", NA_character_, "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "Boreal/taiga soil uptake benchmark.",
+  "Chamber/soil candidate", "Seiler et al. 1984", "Tropical soils and termite nests", "Tropical regions", "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "May be too broad for site-level comparison.",
+  "Chamber/soil candidate", "Scharffe et al. 1990", "Tropical soils/savanna", "Guayana Shield, Venezuela", "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "Tropical benchmark.",
+  "Chamber/soil candidate", "Teh et al. 2005", "Humid tropical forest soils", NA_character_, "Soil chambers", "Identified in draft; numeric flux still needs full-text/table extraction", NA_character_, "Tropical soil process benchmark.",
+  "Chamber/soil candidate", "von Fischer and Hedin 2002", "Forest soils", NA_character_, "Isotope pool dilution/chambers", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1029/2001GB001448", "Production and consumption rates, not only net flux.",
+  "Chamber/soil candidate", "Angle et al. 2017", "Wetland oxygenated soils", NA_character_, "Soil incubations/chambers", "Identified in draft; numeric flux still needs full-text/table extraction", "https://doi.org/10.1038/ncomms15617", "Process-oriented wetland source.",
+  "Chamber/soil synthesis candidate", "Treat et al. 2014", "Permafrost peatlands", "Pan-Arctic", "Synthesis", "Identified in draft; numeric flux still needs synthesis extraction", NA_character_, "Synthesis may provide broad wetland/permafrost benchmark.",
+  "Chamber/soil synthesis candidate", "Treat et al. 2018", "Permafrost-region ecosystems", "Pan-Arctic", "Synthesis", "Identified in draft; numeric flux still needs synthesis extraction", NA_character_, "Nongrowing-season benchmark.",
+  "Chamber/soil synthesis candidate", "Turetsky et al. 2014", "Wetlands", "Global", "Synthesis", "Identified in draft; numeric flux still needs synthesis extraction", "https://doi.org/10.1111/gcb.12580", "Large wetland synthesis; likely best for broad wetland comparison rather than site count.",
+  "Chamber/soil synthesis candidate", "Smith et al. 2000", "Northern European soils", "Northern Europe", "Comparison/review", "Identified in draft; numeric flux still needs synthesis extraction", NA_character_, "Useful regional soil uptake/emission benchmark."
+)
+
+draft_candidate_extracted_info <- tribble(
+  ~reference_id, ~extraction_status, ~plot_ready, ~ecosystem_class, ~location, ~measurement_type, ~reported_metric, ~reported_units, ~daily_mgC_m2_day, ~daily_low_mgC_m2_day, ~daily_high_mgC_m2_day, ~conversion_note, ~full_reference, ~notes,
+  "Shoemaker et al. 2014", "Blocked/full text needed", FALSE, "Temperate evergreen forest", "Howland Forest, Maine, USA", "Ecosystem-scale tower flux", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Shoemaker, J. K., Keenan, T. F., Hollinger, D. Y., and Richardson, A. D. (2014). Forest ecosystem changes from annual methane source to sink depending on late summer water balance. Geophysical Research Letters, 41, 673-679. https://doi.org/10.1002/2013GL058691", "Accessible abstract reports neutral-to-source behavior in 2011 and small sink behavior in 2012, but not numeric rates.",
+  "Hill and Vargas 2022", "Relative comparison extracted; absolute flux still needs full text/table", FALSE, "Temperate tidal salt marsh", "Delaware, USA", "EC and chamber comparison", "Chamber-upscaled estimates underestimated CH4 emissions by 69% relative to eddy covariance", "percent difference", NA_real_, NA_real_, NA_real_, NA_character_, "Hill, A. C., and Vargas, R. (2022). Methane and carbon dioxide fluxes in a temperate tidal salt marsh: Comparisons between plot and ecosystem measurements. Journal of Geophysical Research: Biogeosciences, 127. https://doi.org/10.1029/2022JG006943", "Useful scale-comparison source, but accessible abstract does not provide absolute CH4 flux rate.",
+  "Werner et al. 2003", "Blocked/full text needed", FALSE, "Mixed temperate/boreal lowland and wetland forest", "Northern Wisconsin, USA", "Tall-tower CH4 exchange", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Werner, C., Davis, K., Bakwin, P., Yi, C., Hurst, D., and Lock, L. (2003). Regional-scale measurements of CH4 exchange from a tall tower over a mixed temperate/boreal lowland and wetland forest. Global Change Biology, 9, 1251-1261. https://doi.org/10.1046/j.1365-2486.2003.00670.x", "Likely relevant for regional tower benchmark; numeric rate needs full text/table.",
+  "Schrier-Uijl et al. 2010", "Blocked/full text needed", FALSE, "Heterogeneous grass ecosystem on peat", "Netherlands", "EC and chamber comparison", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Schrier-Uijl, A. P., Kroon, P. S., Hensen, A., Leffelaar, P. A., Berendse, F., and Veenendaal, E. M. (2010). Comparison of chamber and eddy covariance-based CO2 and CH4 emission estimates in a heterogeneous grass ecosystem on peat. Agricultural and Forest Meteorology, 150, 825-831. https://doi.org/10.1016/j.agrformet.2010.05.005", "Relevant scale-comparison source; numeric rate needs full text/table.",
+  "Zhang et al. 2012", "Blocked/full text needed", FALSE, "Permafrost ecosystem", "Siberian permafrost region", "Chamber upscaling to EC/model", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Zhang, Y., Sachs, T., Li, C., and Boike, J. (2012). Upscaling methane fluxes from closed chambers to eddy covariance based on a permafrost biogeochemistry integrated model. Global Change Biology, 18, 1428-1440. https://doi.org/10.1111/j.1365-2486.2011.02587.x", "Relevant chamber-to-EC scaling source; numeric comparison value needs full text/table.",
+  "Yu et al. 2013", "Blocked/full text needed", FALSE, "Alpine wetland", "Tibetan Plateau, China", "EC and chamber comparison", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Yu, L., Wang, H., Wang, G., Song, W., Huang, Y., Li, S.-G., Liang, N., Tang, Y., and He, J.-S. (2013). A comparison of methane emission measurements using eddy covariance and manual and automated chamber-based techniques in Tibetan Plateau alpine wetland. Environmental Pollution, 181, 81-90. https://doi.org/10.1016/j.envpol.2013.06.018", "Relevant wetland scale-comparison source; numeric rate needs full text/table.",
+  "Zhao et al. 2019", "Blocked/full text needed", FALSE, "Small ponds", NA_character_, "Flux-gradient and EC method evaluation", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Zhao, J., Zhang, M., Xiao, W., Wang, W., Zhang, Z., Yu, Z., Xiao, Q., Cao, Z., Xu, J., Zhang, X., Liu, S., and Lee, X. (2019). An evaluation of the flux-gradient and the eddy covariance method to measure CH4, CO2, and H2O fluxes from small ponds. Agricultural and Forest Meteorology, 275, 255-264. https://doi.org/10.1016/j.agrformet.2019.05.032", "Methodologically relevant to gradient fluxes, but aquatic/pond source and numeric rate needs full text/table.",
+  "Keller et al. 1983", "Blocked/full text needed", FALSE, "Forest soils", NA_character_, "Soil chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Keller, M., Goreau, T. J., Wofsy, S. C., Kaplan, W. A., and McElroy, M. B. (1983). Production of nitrous oxide and consumption of methane by forest soils. Geophysical Research Letters, 10, 1156-1159. https://doi.org/10.1029/GL010i012p01156", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Keller et al. 1990", "Blocked/full text needed", FALSE, "Central Panama soils", "Central Panama", "Soil chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Keller, M., Mitre, M. E., and Stallard, R. F. (1990). Consumption of atmospheric methane in soils of central Panama: Effects of agricultural development. Global Biogeochemical Cycles, 4, 21-27. https://doi.org/10.1029/GB004i001p00021", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Steudler et al. 1989", "Blocked/full text needed", FALSE, "Temperate forest soils", NA_character_, "Soil chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Steudler, P. A., Bowden, R. D., Melillo, J. M., and Aber, J. D. (1989). Influence of nitrogen fertilization on methane uptake in temperate forest soils. Nature, 341, 314-316. https://doi.org/10.1038/341314a0", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Yavitt et al. 1990", "Blocked/full text needed", FALSE, "Temperate forest soils", NA_character_, "Soil chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Yavitt, J. B., Downey, D. M., Lang, G. E., and Sexstone, A. J. (1990). Methane consumption in two temperate forest soils. Biogeochemistry, 9, 39-52. https://doi.org/10.1007/BF00002716", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Yavitt et al. 1995", "Blocked/full text needed", FALSE, "Northern hardwood ecosystem", NA_character_, "Soil chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Yavitt, J. B., Fahey, T. J., and Simmons, J. A. (1995). Methane and carbon dioxide dynamics in a northern hardwood ecosystem. Soil Science Society of America Journal, 59, 796-804. https://doi.org/10.2136/sssaj1995.03615995005900030023x", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Crill 1991", "Blocked/full text needed", FALSE, "Temperate woodland soil", NA_character_, "Soil chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Crill, P. M. (1991). Seasonal patterns of methane uptake and carbon dioxide release by a temperate woodland soil. Global Biogeochemical Cycles, 5, 319-334. https://doi.org/10.1029/91GB02466", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Whalen et al. 1991", "Blocked/full text needed", FALSE, "Taiga", NA_character_, "Soil chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Whalen, S. C., Reeburgh, W. S., and Kizer, K. S. (1991). Methane consumption and emission by taiga. Global Biogeochemical Cycles, 5, 261-273. https://doi.org/10.1029/91GB01303", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Seiler et al. 1984", "Blocked/full text needed", FALSE, "Tropical soils and termite nests", NA_character_, "Field chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Seiler, W., Conrad, R., and Scharffe, D. (1984). Field studies of methane emission from termite nests into the atmosphere and measurements of methane uptake by tropical soils. Journal of Atmospheric Chemistry, 1, 171-186. https://doi.org/10.1007/BF00053839", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Scharffe et al. 1990", "Blocked/full text needed", FALSE, "Northern Guayana Shield soils", "Venezuela", "Soil flux chambers", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Scharffe, D., Hao, W. M., Donoso, L., Crutzen, P. J., and Sanhueza, E. (1990). Soil fluxes and atmospheric concentration of CO and CH4 in the northern part of the Guayana Shield, Venezuela. Journal of Geophysical Research, 95, 22475. https://doi.org/10.1029/JD095iD13p22475", "Found as historical chamber/source reference; numeric rate needs full text/table.",
+  "Teh et al. 2005", "Blocked/full text needed", FALSE, "Humid tropical forest soils", NA_character_, "Soil incubations/process rates", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Teh, Y. A., Silver, W. L., and Conrad, M. E. (2005). Oxygen effects on methane production and oxidation in humid tropical forest soils. Global Change Biology, 11, 1283-1297. https://doi.org/10.1111/j.1365-2486.2005.00983.x", "Mechanistic production/oxidation source; numeric net flux needs full text/table.",
+  "von Fischer and Hedin 2002", "Gross rates extracted; not directly net-flux comparable", FALSE, "Diverse soils", "17 field sites", "Field-based isotope pool dilution", "Gross production 0.04-930; gross consumption 0.1-9.2; mean production in dry oxic soils 0.15", "mg CH4-C m-2 d-1", NA_real_, NA_real_, NA_real_, "Already in CH4-C daily units; gross production/consumption rates are not plotted as net fluxes.", "von Fischer, J. C., and Hedin, L. O. (2002). Separating methane production and consumption with a field-based isotope pool dilution technique. Global Biogeochemical Cycles, 16, 8-1-8-13. https://doi.org/10.1029/2001GB001448", "Important evidence for co-occurring production and consumption, but not a net ecosystem/chamber flux point.",
+  "Angle et al. 2017", "Mechanistic contribution extracted; not an absolute flux", FALSE, "Freshwater wetland", "Old Woman Creek, Ohio, USA", "Soil geochemistry/metagenomics/process attribution", "Up to 80% of methane fluxes attributed to methanogenesis in oxygenated soils", "percent contribution", NA_real_, NA_real_, NA_real_, NA_character_, "Angle, J. C., Morin, T. H., Solden, L. M., Narrowe, A. B., Smith, G. J., Borton, M. A., et al. (2017). Methanogenesis in oxygenated soils is a substantial fraction of wetland methane emissions. Nature Communications, 8, 1567. https://doi.org/10.1038/s41467-017-01753-4", "Supports mechanism behind scale mismatch; does not provide a standalone net flux rate for the comparison figure.",
+  "Treat et al. 2014", "Process-production source; not directly net-flux comparable", FALSE, "Alaskan permafrost peats", "Alaska, USA", "Laboratory peat production", NA_character_, NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Treat, C. C., Wollheim, W. M., Varner, R. K., Grandy, A. S., Talbot, J., and Frolking, S. (2014). Temperature and peat type control CO2 and CH4 production in Alaskan permafrost peats. Global Change Biology, 20, 2674-2686. https://doi.org/10.1111/gcb.12572", "Useful for mechanisms; requires full text to extract production rates and is not a net field flux.",
+  "Treat et al. 2018", "Annual synthesis ranges extracted", FALSE, "Northern wetlands and uplands", "Temperate, boreal, and tundra regions", "Synthesis of nongrowing-season and annual CH4 fluxes", "Annual wetland emissions ranged 0.9-78; upland median annual flux 0.0 +/- 0.2", "g CH4 m-2 yr-1", NA_real_, 0.9 * 12 / 16 * 1000 / 365, 78 * 12 / 16 * 1000 / 365, "Annual g CH4 m-2 yr-1 converted to mg C m-2 d-1 as g CH4 * 12/16 * 1000/365.", "Treat, C. C., Bloom, A. A., and Marushchak, M. E. (2018). Nongrowing season methane emissions-a significant component of annual emissions across northern ecosystems. Global Change Biology, 24, 3331-3343. https://doi.org/10.1111/gcb.14137", "Useful broad synthesis benchmark, but not plotted because the accessible value is a multi-ecosystem annual range rather than a site/source-class daily estimate.",
+  "Turetsky et al. 2014", "Controls and dataset size extracted; numeric summary flux still needs full text/table", FALSE, "Northern, temperate, and subtropical wetlands", "71 wetland sites", "Synthesis of instantaneous wetland CH4 fluxes", "Approximately 19,000 instantaneous measurements from 71 wetland sites", "count", NA_real_, NA_real_, NA_real_, NA_character_, "Turetsky, M. R., Kotowska, A., Bubier, J., Dise, N. B., Crill, P., Hornibrook, E. R. C., et al. (2014). A synthesis of methane emissions from 71 northern, temperate, and subtropical wetlands. Global Change Biology, 20, 2183-2197. https://doi.org/10.1111/gcb.12580", "Accessible abstract did not report a numeric flux summary; full table/database extraction needed.",
+  "Smith et al. 2000", "Source identified; numeric rate still needs full text/table", FALSE, "Northern European soils", "Northern Europe", "Soil methane oxidation synthesis/comparison", "Range and statistical distribution of oxidation rates reported, but numeric summary not exposed in accessible abstract", NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Smith, K. A., Dobbie, K. E., Ball, B. C., Bakken, L. R., Sitaula, B. K., Hansen, S., et al. (2000). Oxidation of atmospheric methane in Northern European soils, comparison with other ecosystems, and uncertainties in the global terrestrial sink. Global Change Biology, 6, 791-803. https://doi.org/10.1046/j.1365-2486.2000.00356.x", "The earlier related Ball et al. 1997 paper reports CH4 oxidation rates from 0 to 2.5 mg m-2 d-1, but that value was not assigned to Smith et al. 2000 without full-text confirmation."
+)
+
 assign_reference_ecosystem <- function(ecosystem_class) {
   case_when(
-    str_detect(ecosystem_class, regex("marsh|fen|swamp|bog|wetland|mangrove", ignore_case = TRUE)) ~ "Wetland",
+    str_detect(ecosystem_class, regex("marsh|fen|swamp|bog|mire|wetland|mangrove", ignore_case = TRUE)) ~ "Wetland",
     str_detect(ecosystem_class, regex("lake", ignore_case = TRUE)) ~ "Lake",
     str_detect(ecosystem_class, regex("rice|cropland", ignore_case = TRUE)) ~ "Cropland",
-    str_detect(ecosystem_class, regex("^upland$|drained|desert|rock|ice", ignore_case = TRUE)) ~ "Upland/Desert",
-    str_detect(ecosystem_class, regex("forest", ignore_case = TRUE)) ~ "Forest",
+    str_detect(ecosystem_class, regex("forest|black spruce", ignore_case = TRUE)) ~ "Forest",
+    str_detect(ecosystem_class, regex("^upland$|^drained$|desert|rock|ice", ignore_case = TRUE)) ~ "Upland/Desert",
     str_detect(ecosystem_class, regex("shrubland", ignore_case = TRUE)) ~ "Shrubland",
     str_detect(ecosystem_class, regex("grassland|steppe|savanna", ignore_case = TRUE)) ~ "Grassland/Savanna",
     str_detect(ecosystem_class, regex("tundra", ignore_case = TRUE)) ~ "Tundra",
@@ -248,9 +577,9 @@ era5_site_summary <- era5_annual_budget %>%
     ecosystem_group = assign_neon_ecosystem(EcoType),
     era5_gradient_class = recode(
       as.character(gradient_behavior_for_plot),
-      "Consistent sink" = "NEON ERA5 gapfilled sink",
+      "Weak-sink" = "NEON ERA5 gapfilled sink",
       "Fluctuating" = "NEON ERA5 gapfilled fluctuating",
-      "Consistent source" = "NEON ERA5 gapfilled source"
+      "Weak-source" = "NEON ERA5 gapfilled source"
     )
   )
 
@@ -276,34 +605,36 @@ era5_class_summary <- era5_site_summary %>%
     annual_sd_gC_m2_yr = daily_sd_mgC_m2_day * 365 / 1000
   )
 
+comparison_columns <- c(
+  "comparison_group", "ecosystem_class", "CH4_behavior", "annual_gC_m2_yr",
+  "annual_sd_gC_m2_yr", "daily_mgC_m2_day", "daily_low_mgC_m2_day",
+  "daily_high_mgC_m2_day", "n_sites", "n_site_years", "reference_id",
+  "source_type", "site_id", "location", "latitude", "longitude", "igbp",
+  "measurement_years", "n_observations", "flux_units_original", "full_reference"
+)
+
 comparison_table <- bind_rows(
   fluxnet_reference %>%
     mutate(CH4_behavior = NA_character_) %>%
-    dplyr::select(
-      comparison_group, ecosystem_class, CH4_behavior, annual_gC_m2_yr,
-      annual_sd_gC_m2_yr, daily_mgC_m2_day, daily_low_mgC_m2_day,
-      daily_high_mgC_m2_day, n_sites, n_site_years, reference_id, source_type
-    ),
+    dplyr::select(any_of(comparison_columns)),
   soil_chamber_reference %>%
     mutate(CH4_behavior = NA_character_) %>%
-    dplyr::select(
-      comparison_group, ecosystem_class, CH4_behavior, annual_gC_m2_yr,
-      annual_sd_gC_m2_yr, daily_mgC_m2_day, daily_low_mgC_m2_day,
-      daily_high_mgC_m2_day, n_sites, n_site_years, reference_id, source_type
-    ),
+    dplyr::select(any_of(comparison_columns)),
+  additional_draft_chamber_reference %>%
+    dplyr::select(any_of(comparison_columns)),
+  smud_chamber_reference %>%
+    dplyr::select(any_of(comparison_columns)),
   process_model_uptake %>%
     mutate(CH4_behavior = NA_character_) %>%
-    dplyr::select(
-      comparison_group, ecosystem_class, CH4_behavior, annual_gC_m2_yr,
-      annual_sd_gC_m2_yr, daily_mgC_m2_day, daily_low_mgC_m2_day,
-      daily_high_mgC_m2_day, n_sites, n_site_years, reference_id, source_type
-    ),
+    dplyr::select(any_of(comparison_columns)),
+  non_fluxnet_tower_reference %>%
+    dplyr::select(any_of(comparison_columns)),
+  additional_draft_tower_reference %>%
+    dplyr::select(any_of(comparison_columns)),
+  smud_ec_reference %>%
+    dplyr::select(any_of(comparison_columns)),
   era5_class_summary %>%
-    dplyr::select(
-      comparison_group, ecosystem_class, CH4_behavior, annual_gC_m2_yr,
-      annual_sd_gC_m2_yr, daily_mgC_m2_day, daily_low_mgC_m2_day,
-      daily_high_mgC_m2_day, n_sites, n_site_years, reference_id, source_type
-    )
+    dplyr::select(any_of(comparison_columns))
 ) %>%
   arrange(desc(daily_mgC_m2_day)) %>%
   mutate(
@@ -312,7 +643,10 @@ comparison_table <- bind_rows(
       levels = c(
         "Published ecosystem class",
         "Soil chamber literature",
+        "SMUD soil chamber",
         "Process-based model",
+        "Tower literature outside FLUXNET-CH4",
+        "SMUD tower (EC)",
         "NEON ERA5 gapfilled gradient"
       )
     ),
@@ -327,6 +661,73 @@ write.csv(era5_annual_budget, "OUTPUT/NEON_ERA5_annual_gradient_flux_rates_for_F
 write.csv(era5_site_summary, "OUTPUT/NEON_ERA5_site_median_daily_gradient_flux_classes.csv", row.names = FALSE)
 write.csv(process_model_uptake, "OUTPUT/process_model_upland_CH4_uptake_values.csv", row.names = FALSE)
 write.csv(soil_chamber_reference, "OUTPUT/soil_chamber_CH4_flux_reference_values.csv", row.names = FALSE)
+write.csv(additional_draft_chamber_reference, "OUTPUT/draft_reference_soil_chamber_CH4_flux_values.csv", row.names = FALSE)
+write.csv(non_fluxnet_tower_reference, "OUTPUT/non_FLUXNET_CH4_tower_flux_reference_values.csv", row.names = FALSE)
+write.csv(non_fluxnet_tower_years, "OUTPUT/non_FLUXNET_CH4_tower_flux_reference_years.csv", row.names = FALSE)
+write.csv(additional_draft_tower_reference, "OUTPUT/draft_reference_non_FLUXNET_tower_CH4_flux_values.csv", row.names = FALSE)
+write.csv(draft_candidate_sources, "OUTPUT/draft_reference_CH4_candidate_sources_for_extraction.csv", row.names = FALSE)
+write.csv(draft_candidate_extracted_info, "OUTPUT/draft_reference_CH4_extracted_candidate_info.csv", row.names = FALSE)
+if (nrow(smud_raw) > 0) {
+  write.csv(smud_raw, "OUTPUT/SMUD_CH4_flux_all_filtered_rows.csv", row.names = FALSE)
+  write.csv(smud_ec_reference, "OUTPUT/SMUD_CH4_EC_tower_reference_by_ecosystem.csv", row.names = FALSE)
+  write.csv(smud_chamber_reference, "OUTPUT/SMUD_CH4_chamber_reference_by_ecosystem.csv", row.names = FALSE)
+}
+
+# ── Summary table: medians by data source and state class ─────────────────────
+
+neon_for_table <- era5_site_summary %>%
+  transmute(
+    source_label     = "NEON ERA5",
+    daily_mgC_m2_day = daily_mgC_m2_day,
+    behavior = case_when(
+      daily_mgC_m2_day < 0 ~ "Weak-sink",
+      daily_mgC_m2_day > 0 ~ "Weak-source",
+      TRUE                  ~ "Fluctuating"
+    )
+  )
+
+ref_for_table <- comparison_table %>%
+  filter(source_type != "NEON ERA5 gapfilled gradient") %>%
+  mutate(
+    source_label = case_when(
+      source_type == "Published ecosystem class"            ~ "FLUXNET-CH4",
+      source_type %in% c("Soil chamber literature",
+                         "SMUD soil chamber")              ~ "Chambers",
+      source_type == "Process-based model"                 ~ "Process model",
+      source_type %in% c("Tower literature outside FLUXNET-CH4",
+                         "SMUD tower (EC)")                ~ "Upland towers",
+      TRUE                                                 ~ as.character(source_type)
+    ),
+    behavior = case_when(
+      daily_mgC_m2_day < 0 ~ "Weak-sink",
+      daily_mgC_m2_day > 0 ~ "Weak-source",
+      TRUE                  ~ "Fluctuating"
+    )
+  ) %>%
+  dplyr::select(source_label, daily_mgC_m2_day, behavior)
+
+source_behavior_summary <- bind_rows(ref_for_table, neon_for_table) %>%
+  filter(behavior %in% c("Weak-sink", "Weak-source"), is.finite(daily_mgC_m2_day)) %>%
+  group_by(source_label, behavior) %>%
+  summarise(
+    n                 = n(),
+    median_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE),
+    q25_mgC_m2_day    = quantile(daily_mgC_m2_day, 0.25, na.rm = TRUE),
+    q75_mgC_m2_day    = quantile(daily_mgC_m2_day, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    source_label = factor(source_label,
+                          levels = c("FLUXNET-CH4", "Chambers", "Process model",
+                                     "Upland towers", "NEON ERA5")),
+    behavior     = factor(behavior, levels = c("Weak-sink", "Weak-source"))
+  ) %>%
+  arrange(source_label, behavior)
+
+write.csv(source_behavior_summary,
+          "OUTPUT/CH4_flux_medians_by_source_and_behavior.csv",
+          row.names = FALSE)
+message("Wrote OUTPUT/CH4_flux_medians_by_source_and_behavior.csv")
 
 reference_lines <- c(
   "# References and Values Used",
@@ -353,6 +754,23 @@ reference_lines <- c(
   "Striegl et al. (1992) report that the central 50% of desert soil CH4 uptake rates were 0.24 to 0.92 mg CH4 m-2 d-1; this was converted to -0.18 to -0.69 mg C m-2 d-1.",
   "Mosier et al. (1991) report aerobic soil CH4-C uptake of about 1 to 3 kg CH4-C ha-1 yr-1 across diverse ecosystems including grasslands; this was converted to -0.274 to -0.822 mg C m-2 d-1.",
   "A Danish farmland chamber study reported CH4 fluxes from -0.43 to 0.19 mg CH4 m-2 d-1, with mean -0.15 mg CH4 m-2 d-1; this was converted to -0.3225 to 0.1425 mg C m-2 d-1, with mean -0.1125 mg C m-2 d-1.",
+  "Sundqvist et al. (2015) report Norunda automated soil-chamber uptake of around -10 umol CH4 m-2 h-1; this was converted to -2.88 mg C m-2 d-1.",
+  "",
+  "## Tower CH4 flux rates outside FLUXNET-CH4",
+  "Additional tower benchmarks were extracted from the validation-tower source files associated with references included in the manuscript draft. Half-hourly tower CH4 fluxes were summarized to annual mean daily rates, years with fewer than 100 finite half-hourly observations were excluded, and site-level values are medians across retained years.",
+  "Lakomiec et al. (2021), Stordalen Mire (SE-Sto), subarctic mire, Abisko, Sweden: source file SE-Sto_gas_fluxes_30min.csv, Fch4_1_1_1 in umol CH4 m-2 s-1, converted to mg C m-2 d-1.",
+  "Chi et al. (2020), Svartberget/Krycklan (SE-Svb), managed boreal forest, Sweden: source file CH4_SE_SVB_FLUX+PROFILE_2019.csv, ch4_flux_nmolm2s_85m in nmol CH4 m-2 s-1, converted to mg C m-2 d-1.",
+  "Iwata et al. (2015), US-Uaf, poorly drained black spruce forest over permafrost, Fairbanks, Alaska, USA: source file US-Uaf CH4_concentration.csv, CH4 flux in nmol CH4 m-2 s-1, converted to mg C m-2 d-1.",
+  "Smeets et al. (2009), Blodgett Forest, ponderosa pine plantation, California, USA: whole-period daily mean downward CH4 flux of 2.5 mg CH4 m-2 d-1 converted to -1.875 mg C m-2 d-1.",
+  "Sundqvist et al. (2015), Norunda research station, boreal mixed pine-spruce forest, Sweden: tower-method mean emissions of 1.48-4.57 umol CH4 m-2 h-1 converted to 0.43-1.32 mg C m-2 d-1, with midpoint 0.87 mg C m-2 d-1.",
+  "Wang et al. (2013), Haliburton Forest and Wildlife Reserve, temperate forest, Ontario, Canada: EC uptake flux of -2.7 +/- 0.13 nmol CH4 m-2 s-1 converted to -2.80 mg C m-2 d-1.",
+  "Tower coordinates, when available, came from metadata_validation.csv.",
+  "",
+  "## Candidate CH4 data sources from draft references",
+  "Additional draft references with potential CH4 flux data were inventoried in OUTPUT/draft_reference_CH4_candidate_sources_for_extraction.csv. These rows are not plotted until a numeric CH4 flux rate, units, location, and extraction note are confirmed.",
+  "Accessible information extracted from the candidate sources is recorded in OUTPUT/draft_reference_CH4_extracted_candidate_info.csv. This table separates plot-ready net fluxes from process-only values, relative comparisons, synthesis ranges, and sources that still require full-text/table extraction.",
+  "Treat et al. (2018) provided broad synthesis ranges for annual wetland emissions and upland annual fluxes. These were not added to the plot because they summarize many ecosystem types and seasons rather than a single site/source class.",
+  "von Fischer and Hedin (2002) and Angle et al. (2017) were retained as mechanistic evidence for co-occurring production/consumption and oxic methanogenesis, but not plotted because they report gross process rates or percent attribution rather than directly comparable net CH4 fluxes.",
   "",
   "## NEON ERA5-gapfilled gradient values",
   "NEON values are from this repository's ERA5-gapfilled annual gradient/tower flux output: OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv and OUTPUT/NEON_ERA5_gapfilled_mean_annual_budget.csv.",
@@ -366,15 +784,26 @@ reference_lines <- c(
   "- OUTPUT/NEON_ERA5_annual_gradient_flux_rates_for_FLUXNET_comparison.csv",
   "- OUTPUT/NEON_ERA5_site_median_daily_gradient_flux_classes.csv",
   "- OUTPUT/process_model_upland_CH4_uptake_values.csv",
-  "- OUTPUT/soil_chamber_CH4_flux_reference_values.csv"
+  "- OUTPUT/soil_chamber_CH4_flux_reference_values.csv",
+  "- OUTPUT/draft_reference_soil_chamber_CH4_flux_values.csv",
+  "- OUTPUT/non_FLUXNET_CH4_tower_flux_reference_values.csv",
+  "- OUTPUT/non_FLUXNET_CH4_tower_flux_reference_years.csv",
+  "- OUTPUT/draft_reference_non_FLUXNET_tower_CH4_flux_values.csv",
+  "- OUTPUT/draft_reference_CH4_candidate_sources_for_extraction.csv",
+  "- OUTPUT/draft_reference_CH4_extracted_candidate_info.csv"
 )
 writeLines(reference_lines, "OUTPUT/CH4_flux_FLUXNET_NEON_comparison_references.md")
 
+source_label_levels <- c(
+  "FLUXNET-CH4", "Chambers", "Process model", "Upland towers", "NEON ERA5"
+)
+
 source_offsets <- c(
-  "FLUXNET-CH4" = 0,
-  "Soil chambers" = 0,
+  "FLUXNET-CH4"   = 0,
+  "Chambers"      = 0,
   "Process model" = 0,
-  "NEON ERA5" = 0
+  "Upland towers" = 0,
+  "NEON ERA5"     = 0
 )
 
 reference_plot_data <- comparison_table %>%
@@ -382,133 +811,186 @@ reference_plot_data <- comparison_table %>%
   mutate(
     source_label = recode(
       as.character(source_type),
-      "Published ecosystem class" = "FLUXNET-CH4",
-      "Soil chamber literature" = "Soil chambers",
-      "Process-based model" = "Process model"
+      "Published ecosystem class"            = "FLUXNET-CH4",
+      "Soil chamber literature"              = "Chambers",
+      "SMUD soil chamber"                    = "Chambers",
+      "Process-based model"                  = "Process model",
+      "Tower literature outside FLUXNET-CH4" = "Upland towers",
+      "SMUD tower (EC)"                      = "Upland towers"
     ),
-    source_label = factor(source_label, levels = c("FLUXNET-CH4", "Soil chambers", "Process model", "NEON ERA5")),
+    source_label = factor(source_label, levels = source_label_levels),
     ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
     y_base = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
-    y_plot = y_base + source_offsets[source_label]
+    y_plot = y_base + source_offsets[source_label],
+    CH4_behavior = case_when(
+      daily_mgC_m2_day < 0 ~ "Weak-sink",
+      daily_mgC_m2_day > 0 ~ "Weak-source",
+      TRUE ~ "Fluctuating"
+    ),
+    CH4_behavior = factor(CH4_behavior, levels = behavior_levels)
   ) %>%
   filter(!is.na(y_plot), is.finite(daily_mgC_m2_day)) %>%
   reframe(
-    .by = c(ecosystem_group, source_label, y_base, y_plot),
+    .by = c(ecosystem_group, source_label, CH4_behavior, y_base, y_plot),
     n_estimates = dplyr::n(),
     daily_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE),
     daily_low_mgC_m2_day = min(daily_low_mgC_m2_day, na.rm = TRUE),
     daily_high_mgC_m2_day = max(daily_high_mgC_m2_day, na.rm = TRUE)
   )
 
-neon_plot_data <- era5_site_summary %>%
-  mutate(
-    source_label = factor("NEON ERA5", levels = c("FLUXNET-CH4", "Soil chambers", "Process model", "NEON ERA5")),
-    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
-    y_base = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
-    y_plot = y_base + source_offsets[source_label]
-  ) %>%
-  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day)) %>%
-  reframe(
-    .by = c(ecosystem_group, source_label, y_base, y_plot),
-    n_sites = dplyr::n(),
-    prop_source_sites = mean(daily_mgC_m2_day > 0, na.rm = TRUE),
-    daily_low_mgC_m2_day = quantile(daily_mgC_m2_day, 0.25, na.rm = TRUE),
-    daily_high_mgC_m2_day = quantile(daily_mgC_m2_day, 0.75, na.rm = TRUE),
-    daily_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE)
-  ) %>%
-  mutate(
-    grouped_behavior = case_when(
-      prop_source_sites >= 0.75 ~ "Consistent source",
-      prop_source_sites <= 0.25 ~ "Consistent sink",
-      TRUE ~ "Fluctuating"
-    ),
-    grouped_behavior = factor(grouped_behavior, levels = behavior_levels)
-  )
-
-neon_site_points <- era5_site_summary %>%
-  mutate(
-    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
-    y_base = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
-    y_plot = y_base,
-    grouped_behavior = factor(gradient_behavior_for_plot, levels = behavior_levels)
-  ) %>%
-  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day), !is.na(grouped_behavior))
+# SMUD aggregated by ecosystem × behavior class (sink / source shown separately)
+smud_behavior_plot_data <- if (nrow(smud_raw) > 0) {
+  smud_raw %>%
+    mutate(
+      smud_source    = if_else(is_ec, "SMUD EC", "SMUD chambers"),
+      ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
+      CH4_behavior    = factor(CH4_behavior, levels = behavior_levels)
+    ) %>%
+    group_by(ecosystem_group, smud_source, CH4_behavior) %>%
+    summarise(
+      n_obs                 = n(),
+      daily_mgC_m2_day      = median(Annual, na.rm = TRUE),
+      daily_low_mgC_m2_day  = quantile(Annual, 0.25, na.rm = TRUE),
+      daily_high_mgC_m2_day = quantile(Annual, 0.75, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      y_base = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
+      y_plot = y_base
+    ) %>%
+    filter(!is.na(y_base), is.finite(daily_mgC_m2_day))
+} else {
+  tibble()
+}
 
 ecosystem_axis <- tibble(
   ecosystem_group = factor(ecosystem_levels, levels = ecosystem_levels),
   y_base = length(ecosystem_levels) - seq_along(ecosystem_levels) + 1
 )
 
+# Validation towers (non-FLUXNET): one segment per directly-measured site only.
+# additional_draft_tower_reference (US-Blo, SE-Nor, CA-Hal) is already aggregated
+# into the "Upland towers" symbol and should not appear here as well.
+validation_tower_line_data <- non_fluxnet_tower_reference %>%
+  dplyr::select(site_id, ecosystem_class, daily_mgC_m2_day, CH4_behavior) %>%
+  filter(is.finite(daily_mgC_m2_day)) %>%
+  mutate(
+    ecosystem_group = factor(assign_reference_ecosystem(ecosystem_class), levels = ecosystem_levels),
+    CH4_behavior    = factor(CH4_behavior, levels = behavior_levels)
+  ) %>%
+  left_join(ecosystem_axis %>% dplyr::select(ecosystem_group, y_base), by = "ecosystem_group") %>%
+  filter(!is.na(y_base))
+
+neon_behavior_yoffset <- c(
+  "Weak-sink"   = -0.22,
+  "Fluctuating" =  0.00,
+  "Weak-source" =  0.22
+)
+
+neon_plot_data <- era5_site_summary %>%
+  mutate(
+    source_label    = factor("NEON ERA5", levels = source_label_levels),
+    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
+    y_base          = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
+    CH4_behavior    = factor(gradient_behavior_for_plot, levels = behavior_levels),
+    y_plot          = y_base + neon_behavior_yoffset[as.character(gradient_behavior_for_plot)]
+  ) %>%
+  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day), !is.na(CH4_behavior)) %>%
+  reframe(
+    .by = c(ecosystem_group, source_label, CH4_behavior, y_base, y_plot),
+    n_sites               = dplyr::n(),
+    daily_low_mgC_m2_day  = quantile(daily_mgC_m2_day, 0.25, na.rm = TRUE),
+    daily_high_mgC_m2_day = quantile(daily_mgC_m2_day, 0.75, na.rm = TRUE),
+    daily_mgC_m2_day      = median(daily_mgC_m2_day, na.rm = TRUE)
+  )
+
+neon_site_points <- era5_site_summary %>%
+  mutate(
+    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
+    y_base          = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
+    CH4_behavior    = factor(gradient_behavior_for_plot, levels = behavior_levels),
+    y_plot          = y_base + neon_behavior_yoffset[as.character(gradient_behavior_for_plot)]
+  ) %>%
+  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day), !is.na(CH4_behavior))
+
 source_shapes <- c(
-  "FLUXNET-CH4" = 21,
-  "Soil chambers" = 24,
-  "Process model" = 22,
-  "NEON ERA5" = 21
+  "FLUXNET-CH4"       = 21,
+  "Chambers"          = 24,
+  "Process model"     = 22,
+  "Upland towers"     = 1,    # hollow circle — shares circle family with FLUXNET-CH4 and NEON ERA5
+  "Validation towers" = 1,    # placeholder shape; overridden to line in guide
+  "NEON ERA5"         = 21
 )
 source_fills <- c(
-  "FLUXNET-CH4" = NA,
-  "Soil chambers" = "#C49A6C",
-  "Process model" = "#CBC9E2",
-  "NEON ERA5" = "#009E73"
+  "FLUXNET-CH4"       = NA,
+  "Chambers"          = "#C49A6C",
+  "Process model"     = "#CBC9E2",
+  "Upland towers"     = NA,
+  "Validation towers" = NA,
+  "NEON ERA5"         = "#009E73"
 )
 source_outline <- c(
-  "FLUXNET-CH4" = "grey15",
-  "Soil chambers" = "#C49A6C",
-  "Process model" = "#CBC9E2",
-  "NEON ERA5" = "#009E73"
+  "FLUXNET-CH4"       = "grey15",
+  "Chambers"          = "#C49A6C",
+  "Process model"     = "#CBC9E2",
+  "Upland towers"     = "#7B3294",
+  "Validation towers" = "#7B3294",
+  "NEON ERA5"         = "#009E73"
 )
 source_legend_fills <- source_fills
 source_legend_fills["FLUXNET-CH4"] <- "white"
-source_legend_fills["NEON ERA5"] <- "black"
+source_legend_fills["NEON ERA5"]   <- "black"
 source_legend_outline <- source_outline
 source_legend_outline["NEON ERA5"] <- "black"
 
+source_label_levels <- names(source_shapes)
+
 source_legend_data <- tibble(
-  source_label = factor(names(source_shapes), levels = names(source_shapes)),
+  source_label = factor(source_label_levels, levels = source_label_levels),
   daily_mgC_m2_day = 0,
   y_plot = 0
 )
 
-axis_text_size <-16
+axis_text_size <- 10
 
 comparison_figure <- ggplot() +
   annotate(
     "rect",
-    xmin = -20,
+    xmin = -5,
     xmax = 0,
     ymin = -Inf,
     ymax = Inf,
-    fill = "#DCEEFF",
-    alpha = 0.28
+    fill = "#BFDDF5",
+    alpha = 0.52
   ) +
   annotate(
     "text",
-    x = -2.7,
-    y = max(ecosystem_axis$y_base) + 0.48,
-    label = "Upland Sink",
+    x = -0.22,
+    y = max(ecosystem_axis$y_base) + 0.42,
+    label = "Weak-sink",
     color = "#2166AC",
     fontface = "bold",
-    size = 6,
-    hjust = 0
+    size = 3.5,
+    hjust = 0.5
   ) +
   annotate(
     "rect",
     xmin = 0,
-    xmax = 10,
+    xmax = 5,
     ymin = -Inf,
     ymax = Inf,
-    fill = "#FDE0DD",
-    alpha = 0.24
+    fill = "#F5C0BD",
+    alpha = 0.48
   ) +
   annotate(
     "text",
-    x = 0.18,
-    y = max(ecosystem_axis$y_base) + 0.48,
-    label = "Upland Source",
+    x = 0.22,
+    y = max(ecosystem_axis$y_base) + 0.42,
+    label = "Weak-source",
     color = "#B2182B",
     fontface = "bold",
-    size = 6,
-    hjust = 0
+    size = 3.5,
+    hjust = 0.5
   ) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey35", linewidth = 0.5) +
   geom_hline(
@@ -517,86 +999,77 @@ comparison_figure <- ggplot() +
     color = "grey92",
     linewidth = 0.35
   ) +
+  # Reference source errorbars — fixed colors by source type
   geom_errorbar(
     data = reference_plot_data %>% filter(source_label == "FLUXNET-CH4"),
-    aes(
-      x = daily_mgC_m2_day,
-      y = y_plot,
-      xmin = daily_low_mgC_m2_day,
-      xmax = daily_high_mgC_m2_day
-    ),
-    orientation = "y",
-    width = 0.07,
-    linewidth = 0.85,
-    color = source_outline["FLUXNET-CH4"],
-    alpha = 0.78
+    aes(x = daily_mgC_m2_day, y = y_plot,
+        xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
+    orientation = "y", width = 0.07, linewidth = 0.85,
+    color = source_outline["FLUXNET-CH4"], alpha = 0.65
   ) +
   geom_errorbar(
-    data = reference_plot_data %>% filter(source_label == "Soil chambers"),
-    aes(
-      x = daily_mgC_m2_day,
-      y = y_plot,
-      xmin = daily_low_mgC_m2_day,
-      xmax = daily_high_mgC_m2_day
-    ),
-    orientation = "y",
-    width = 0.07,
-    linewidth = 1.25,
-    color = source_outline["Soil chambers"],
-    alpha = 0.78
+    data = reference_plot_data %>% filter(source_label == "Chambers"),
+    aes(x = daily_mgC_m2_day, y = y_plot,
+        xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
+    orientation = "y", width = 0.07, linewidth = 0.85,
+    color = source_outline["Chambers"], alpha = 0.65
   ) +
   geom_errorbar(
     data = reference_plot_data %>% filter(source_label == "Process model"),
-    aes(
-      x = daily_mgC_m2_day,
-      y = y_plot,
-      xmin = daily_low_mgC_m2_day,
-      xmax = daily_high_mgC_m2_day
-    ),
-    orientation = "y",
-    width = 0.07,
-    linewidth = 1.25,
-    color = source_outline["Process model"],
-    alpha = 0.78
+    aes(x = daily_mgC_m2_day, y = y_plot,
+        xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
+    orientation = "y", width = 0.07, linewidth = 0.85,
+    color = source_outline["Process model"], alpha = 0.65
   ) +
   geom_errorbar(
-    data = neon_plot_data,
-    aes(
-      x = daily_mgC_m2_day,
-      y = y_plot,
-      xmin = daily_low_mgC_m2_day,
-      xmax = daily_high_mgC_m2_day,
-      color = grouped_behavior
-    ),
-    orientation = "y",
-    width = 0.07,
-    linewidth = 1.35,
-    alpha = 0.85
+    data = reference_plot_data %>% filter(source_label == "Upland towers"),
+    aes(x = daily_mgC_m2_day, y = y_plot,
+        xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
+    orientation = "y", width = 0.07, linewidth = 0.85,
+    color = source_outline["Upland towers"], alpha = 0.65
   ) +
+  # Validation tower individual site segments — distinct purple, not part of behavior scale
+  geom_segment(
+    data = validation_tower_line_data,
+    aes(x = daily_mgC_m2_day, xend = daily_mgC_m2_day,
+        y = y_base - 0.30, yend = y_base + 0.30),
+    color = "#7B3294",
+    linewidth = 1.8,
+    alpha = 0.82,
+    show.legend = FALSE
+  ) +
+  # Ghost points for shape legend (all sources except Validation towers)
   geom_point(
-    data = source_legend_data,
+    data = source_legend_data %>%
+      filter(as.character(source_label) != "Validation towers") %>%
+      mutate(source_label = droplevels(source_label)),
     aes(x = daily_mgC_m2_day, y = y_plot, shape = source_label),
-    alpha = 0,
-    size = 0,
-    show.legend = TRUE
+    alpha = 0, size = 0, show.legend = TRUE
   ) +
+  # Validation towers ghost — key_glyph="path" renders as a line in the legend
+  geom_point(
+    data = source_legend_data %>%
+      filter(as.character(source_label) == "Validation towers"),
+    aes(x = daily_mgC_m2_day, y = y_plot, shape = source_label),
+    color = "#7B3294", linewidth = 2, alpha = 0, size = 0, show.legend = TRUE,
+    key_glyph = "path"
+  ) +
+  # Reference source points — fixed colors by source type
   geom_point(
     data = reference_plot_data %>% filter(source_label == "FLUXNET-CH4"),
     aes(x = daily_mgC_m2_day, y = y_plot),
     shape = source_shapes["FLUXNET-CH4"],
     fill = source_fills["FLUXNET-CH4"],
     color = source_outline["FLUXNET-CH4"],
-    size = 8.6,
-    stroke = 1.0
+    size = 4.5, stroke = 1.0, alpha = 0.65
   ) +
   geom_point(
-    data = reference_plot_data %>% filter(source_label == "Soil chambers"),
+    data = reference_plot_data %>% filter(source_label == "Chambers"),
     aes(x = daily_mgC_m2_day, y = y_plot),
-    shape = source_shapes["Soil chambers"],
-    fill = source_fills["Soil chambers"],
-    color = source_outline["Soil chambers"],
-    size = 8.6,
-    stroke = 1.0
+    shape = source_shapes["Chambers"],
+    fill = source_fills["Chambers"],
+    color = source_outline["Chambers"],
+    size = 4.5, stroke = 1.0, alpha = 0.65
   ) +
   geom_point(
     data = reference_plot_data %>% filter(source_label == "Process model"),
@@ -604,41 +1077,36 @@ comparison_figure <- ggplot() +
     shape = source_shapes["Process model"],
     fill = source_fills["Process model"],
     color = source_outline["Process model"],
-    size = 8.6,
-    stroke = 1.0
+    size = 4.5, stroke = 1.0, alpha = 0.65
   ) +
+  geom_point(
+    data = reference_plot_data %>% filter(source_label == "Upland towers"),
+    aes(x = daily_mgC_m2_day, y = y_plot),
+    shape = source_shapes["Upland towers"],
+    color = source_outline["Upland towers"],
+    size = 4.5, stroke = 1.2, alpha = 0.65
+  ) +
+  # NEON individual site points — colored by state class, no summary
   geom_point(
     data = neon_site_points,
-    aes(x = daily_mgC_m2_day, y = y_plot, color = grouped_behavior, fill = grouped_behavior),
+    aes(x = daily_mgC_m2_day, y = y_plot, color = CH4_behavior, fill = CH4_behavior),
     shape = source_shapes["NEON ERA5"],
-    alpha = 0.3,
-    size = 3.0,
-    stroke = 0.8,
-    position = position_jitter(height = 0.11, width = 0, seed = 20260525),
-    show.legend = FALSE
+    alpha = 0.35, size = 3.5, stroke = 0.8,
+    position = position_jitter(height = 0.06, width = 0, seed = 20260525)
   ) +
-  geom_point(
-    data = neon_plot_data,
-    aes(x = daily_mgC_m2_day, y = y_plot, color = grouped_behavior, fill = grouped_behavior),
-    shape = source_shapes["NEON ERA5"],
-    alpha = 0.9,
-    size = 8.6,
-    stroke = 1.0
-  ) +
+  # Ghost point for state class color legend
   geom_point(
     data = tibble(
       daily_mgC_m2_day = 0,
       y_plot = 0,
-      grouped_behavior = factor(behavior_levels, levels = behavior_levels)
+      CH4_behavior = factor(behavior_levels, levels = behavior_levels)
     ),
-    aes(x = daily_mgC_m2_day, y = y_plot, color = grouped_behavior),
-    alpha = 0,
-    size = 0,
-    show.legend = TRUE
+    aes(x = daily_mgC_m2_day, y = y_plot, color = CH4_behavior),
+    alpha = 0, size = 0, show.legend = TRUE
   ) +
-  scale_shape_manual(values = source_shapes, breaks = names(source_shapes), name = "Data source") +
+  scale_shape_manual(values = source_shapes, breaks = source_label_levels, name = "Data source") +
   scale_fill_manual(values = behavior_colors, breaks = behavior_levels, guide = "none", drop = FALSE, na.translate = FALSE) +
-  scale_color_manual(values = behavior_colors, breaks = behavior_levels, name = "NEON class", drop = FALSE, na.translate = FALSE) +
+  scale_color_manual(values = behavior_colors, breaks = behavior_levels, labels = behavior_labels[behavior_levels], name = "State class", drop = FALSE, na.translate = FALSE) +
   scale_x_continuous(
     trans = pseudo_log_trans(sigma = 0.01),
     breaks = c(-20, -5, -1, -0.1, 0, 0.1, 1, 10, 100),
@@ -647,36 +1115,30 @@ comparison_figure <- ggplot() +
   scale_y_continuous(
     breaks = ecosystem_axis$y_base,
     labels = ecosystem_axis$ecosystem_group,
-    expand = expansion(mult = c(0.05, 0.06))
+    expand = expansion(mult = c(0.05, 0.12))
   ) +
   labs(
-    title = "ERA5-gapfilled NEON gradient CH4 fluxes compared with published benchmarks",
-    subtitle = paste(
-      "Rows align comparable ecosystem types; symbols distinguish FLUXNET-CH4, process models, soil chambers, and NEON ERA5.",
-      "\nEach ecosystem/source pair is consolidated into one estimate; error bars show range or interquartile range. Negative values indicate CH4 uptake."
-    ),
+    title = expression(bold("ERA5-gapfilled NEON gradient CH"[4]*" fluxes vs. published benchmarks")),
     x = expression("Daily CH"[4] * " flux (mg C m"^-2 * " d"^-1 * "; pseudo-log scale)"),
-    y = NULL,
-    caption = paste(
-      "NEON values summarize site-level medians across ERA5-gapfilled annual gradient budgets converted to daily rates.",
-      coverage_note
-    )
+    y = NULL
   ) +
   guides(
     shape = guide_legend(
       override.aes = list(
-        shape = unname(source_shapes[names(source_shapes)]),
-        size = 9.6,
-        alpha = 1,
-        fill = unname(source_legend_fills[names(source_shapes)]),
-        colour = unname(source_legend_outline[names(source_shapes)]),
-        stroke = 1.2
+        # order: FLUXNET-CH4, Chambers, Process model, Upland towers, Validation towers, NEON ERA5
+        shape     = c(21,       24,          22,              1,               1,                    21),
+        size      = c(4.5,      4.5,         4.5,             4.5,             0,                    4.5),
+        linewidth = c(0.5,      0.5,         0.5,             0.5,             2.0,                  0.5),
+        alpha     = 1,
+        fill      = c("white",  "#C49A6C",   "#CBC9E2",       NA,              NA,                   "black"),
+        colour    = c("grey15", "#C49A6C",   "#CBC9E2",       "#7B3294",       "#7B3294",            "black"),
+        stroke    = 1.0
       ),
       order = 1,
-      nrow = 1
+      nrow = 2
     ),
     color = guide_legend(
-      override.aes = list(shape = 16, size = 9, alpha = 1, color = unname(behavior_colors[behavior_levels])),
+      override.aes = list(shape = 16, size = 4, alpha = 1, color = unname(behavior_colors[behavior_levels])),
       order = 2,
       nrow = 1
     ),
@@ -687,9 +1149,8 @@ comparison_figure <- ggplot() +
     legend.position = "bottom",
     legend.justification = "center",
     legend.box = "vertical",
-    plot.title = element_text(face = "bold", size = 25),
-    plot.subtitle = element_text(size = 16),
-    plot.caption = element_text(size = 14, color = "grey25"),
+    plot.title = element_text(face = "bold", size = panel_title_size),
+    plot.margin = margin(t = 5, r = 15, b = 5, l = 5),
     axis.title = element_text(size = axis_title_size),
     axis.text = element_text(size = axis_text_size),
     legend.title = element_text(size = legend_title_size),
@@ -702,9 +1163,139 @@ ggsave(
   "FIGURES/NEON_FLUXNET_CH4_flux_comparison.png",
   plot = comparison_figure,
   width = 18,
-  height = 10.5,
+  height = 12,
   units = "in",
   dpi = 300
 )
 
 message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_comparison.png")
+
+# ── Density plot: NEON towers vs upland towers vs chambers ────────────────────
+
+density_group_colors <- c(
+  "Towers"   = "black",
+  "Chambers" = "#C49A6C"
+)
+
+# Upland (non-inundated) ecosystem groups — excludes Wetland and Lake
+upland_eco_groups <- c("Urban", "Cropland", "Forest", "Shrubland",
+                       "Grassland/Savanna", "Tundra", "Upland/Desert")
+
+density_plot_data <- bind_rows(
+  # Towers: NEON ERA5 site medians — upland only
+  era5_site_summary %>%
+    filter(ecosystem_group %in% upland_eco_groups) %>%
+    transmute(flux = daily_mgC_m2_day, group = "Towers"),
+  # Towers: site-year values from measured validation towers — upland only
+  non_fluxnet_tower_years %>%
+    filter(assign_reference_ecosystem(ecosystem_class) %in% upland_eco_groups) %>%
+    transmute(flux = daily_mgC_m2_day, group = "Towers"),
+  # Towers: literature summary values (all upland forests)
+  additional_draft_tower_reference %>%
+    transmute(flux = daily_mgC_m2_day, group = "Towers"),
+  # Towers: individual SMUD EC studies — upland only
+  smud_raw %>%
+    filter(is_ec, ecosystem_group %in% upland_eco_groups) %>%
+    transmute(flux = Annual, group = "Towers"),
+  # Chambers: literature summary values — upland only
+  soil_chamber_reference %>%
+    filter(assign_reference_ecosystem(ecosystem_class) %in% upland_eco_groups) %>%
+    transmute(flux = daily_mgC_m2_day, group = "Chambers"),
+  additional_draft_chamber_reference %>%
+    transmute(flux = daily_mgC_m2_day, group = "Chambers"),
+  # Chambers: individual SMUD chamber studies — upland only
+  smud_raw %>%
+    filter(!is_ec, ecosystem_group %in% upland_eco_groups) %>%
+    transmute(flux = Annual, group = "Chambers")
+) %>%
+  filter(is.finite(flux)) %>%
+  mutate(group = factor(group, levels = names(density_group_colors)))
+
+density_n_labels <- density_plot_data %>%
+  count(group) %>%
+  mutate(label = paste0(group, "\n(n = ", n, ")"))
+
+flux_density_figure <- ggplot(density_plot_data, aes(x = flux, fill = group, color = group)) +
+  annotate(
+    "rect", xmin = -5, xmax = 0, ymin = -Inf, ymax = Inf,
+    fill = "#BFDDF5", alpha = 0.40
+  ) +
+  annotate(
+    "rect", xmin = 0, xmax = 5, ymin = -Inf, ymax = Inf,
+    fill = "#FF9999", alpha = 0.55
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey35", linewidth = 0.5) +
+  geom_density(alpha = 0.35, linewidth = 1.0, trim = FALSE) +
+  scale_x_continuous(
+    trans  = pseudo_log_trans(sigma = 0.01),
+    breaks = c(-20, -5, -1, -0.1, 0, 0.1, 1, 10, 100),
+    labels = c("-20", "-5", "-1", "-0.1", "0", "0.1", "1", "10", "100")
+  ) +
+  scale_fill_manual(
+    values = density_group_colors,
+    labels = setNames(density_n_labels$label, density_n_labels$group),
+    name   = "Data source"
+  ) +
+  scale_color_manual(
+    values = density_group_colors,
+    labels = setNames(density_n_labels$label, density_n_labels$group),
+    name   = "Data source"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    legend.position  = "top",
+    legend.text      = element_text(size = 10),
+    legend.title     = element_text(size = 11),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    title = expression(bold("Non-inundated CH"[4]*" flux distributions: towers vs chambers")),
+    x     = expression("Daily CH"[4] * " flux (mg C m"^-2 * " d"^-1 * "; pseudo-log scale)"),
+    y     = "Density"
+  )
+
+ggsave(
+  "FIGURES/NEON_FLUXNET_CH4_flux_density.png",
+  plot   = flux_density_figure,
+  width  = 12,
+  height = 7,
+  units  = "in",
+  dpi    = 300
+)
+
+message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_density.png")
+
+# ── Two-panel combined figure (A = comparison, B = density) ──────────────────
+
+combined_figure <- (
+  comparison_figure +
+    labs(tag = "A") +
+    theme(plot.tag = element_text(size = 14, face = "bold"))
+) /
+  (
+    flux_density_figure +
+      labs(tag = "B") +
+      theme(plot.tag = element_text(size = 14, face = "bold"))
+  ) +
+  plot_layout(heights = c(2, 1)) &
+  theme(
+    axis.text        = element_text(size = 10),
+    axis.title       = element_text(size = 12),
+    legend.text      = element_text(size = 10),
+    legend.title     = element_text(size = 11),
+    plot.title       = element_text(size = 13, face = "bold"),
+    plot.subtitle    = element_text(size = 10),
+    plot.caption     = element_text(size = 10),
+    strip.text       = element_text(size = 11)
+  )
+
+ggsave(
+  "FIGURES/NEON_FLUXNET_CH4_flux_combined.png",
+  plot   = combined_figure,
+  width  = 10,
+  height = 12,
+  units  = "in",
+  dpi    = 300
+)
+
+message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_combined.png")

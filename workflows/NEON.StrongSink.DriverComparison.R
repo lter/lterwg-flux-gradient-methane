@@ -4,18 +4,18 @@
 # equal-weighted site-month-hour flux bins.
 #
 # Historical versions focused on "strong sink" sites. After switching the
-# workflow to total flux, there may be no Consistent sink sites. This script
+# workflow to total flux, there may be no Weak-sink sites. This script
 # therefore keeps the old sink comparison when possible, and otherwise compares
 # the behavior classes present in OUTPUT/30min_site_behavior.csv.
 
 
 # This script compares the site-level environmental drivers of the CH4 behavior classes from flow.30min.analysis.R.
 # 
-# In plain English: it asks, “What site attributes differ between the sites classified as Consistent source and the sites classified as Fluctuating?”
+# In plain English: it asks, “What site attributes differ between the sites classified as Weak-source and the sites classified as Fluctuating?”
 # 
-# There are currently no Consistent sink sites, so despite the script name, it is not comparing strong sinks right now. It falls back to:
+# There are currently no Weak-sink sites, so despite the script name, it is not comparing strong sinks right now. It falls back to:
 #   
-#   Consistent source vs Fluctuating
+#   Weak-source vs Fluctuating
 # What it does:
 #   
 #   Loads corrected outputs from the 30-minute analysis:
@@ -47,7 +47,7 @@
 # OUTPUT/NEON_site_driver_values_for_sink_comparison.csv
 # FIGURES/NEON_strong_sink_driver_comparison.png
 # FIGURES/NEON_total_flux_driver_distributions_all.png
-# The current strongest contrasts are that Consistent source sites tend to have lower dry mass, lower pH/acidity values, higher MAT, lower C:N, and lower estimated organic carbon than Fluctuating sites. These are exploratory contrasts, not causal tests.
+# The current strongest contrasts are that Weak-source sites tend to have lower dry mass, lower pH/acidity values, higher MAT, lower C:N, and lower estimated organic carbon than Fluctuating sites. These are exploratory contrasts, not causal tests.
 
 library(tidyverse)
 library(ggplot2)
@@ -98,12 +98,12 @@ if (length(missing_behavior_cols) > 0) {
   )
 }
 
-behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
+behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
 # Color convention: blue = sink (uptake), grey = fluctuating, red = source (emission)
 behavior_colors <- c(
-  "Consistent sink"   = "#2166AC",
+  "Weak-sink"   = "#2166AC",
   "Fluctuating"       = "#4D4D4D",
-  "Consistent source" = "#B2182B"
+  "Weak-source" = "#B2182B"
 )
 driver_group_colors <- c(
   "Moisture" = "#1B9E77",
@@ -129,11 +129,11 @@ if (nrow(present_behaviors) < 2) {
   stop("Need at least two CH4 behavior classes to compare drivers.")
 }
 
-if ("Consistent sink" %in% as.character(present_behaviors$CH4_behavior)) {
+if ("Weak-sink" %in% as.character(present_behaviors$CH4_behavior)) {
   comparison_mode <- "strong_sink_vs_other"
-  focus_behavior <- "Consistent sink"
+  focus_behavior <- "Weak-sink"
   reference_behavior <- "Other behavior classes"
-  comparison_title <- "Consistent sink vs other total-flux behavior classes"
+  comparison_title <- "Weak-sink vs other total-flux behavior classes"
 } else {
   comparison_mode <- "available_behavior_contrast"
   focus_behavior <- as.character(present_behaviors$CH4_behavior[nrow(present_behaviors)])
@@ -511,7 +511,7 @@ writeLines(
     "## Interpretation",
     paste0("- Positive Cliff's delta means a variable is higher in `", focus_behavior, "`; negative means lower."),
     "- Treat p-values as exploratory because site counts are small and many site attributes covary.",
-    "- Under the current total-flux behavior classes, there are no `Consistent sink` sites; this script therefore compares available behavior classes unless sinks reappear in future outputs.",
+    "- Under the current total-flux behavior classes, there are no `Weak-sink` sites; this script therefore compares available behavior classes unless sinks reappear in future outputs.",
     "",
     "## Outputs",
     "- `OUTPUT/NEON_strong_sink_driver_comparison.csv`",

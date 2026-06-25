@@ -268,7 +268,7 @@ prediction_grid_out <- prediction_grid %>%
 
 write.csv(prediction_grid_out, "OUTPUT/NON_30min_gapfill_prediction_grid.csv", row.names = FALSE)
 write.csv(monthly_budgets, "OUTPUT/NON_30min_gapfill_monthly_budgets.csv", row.names = FALSE)
-write.csv(annual_budgets, "OUTPUT/NON_30min_gapfill_annual_budgets.csv", row.names = FALSE)
+write.csv(annual_budgets, "OUTPUT/NEON_30min_gapfill_annual_budgets.csv", row.names = FALSE)
 
 # Color convention: blue = sink (uptake), grey = fluctuating, red = source (emission)
 budget_colors <- c(
@@ -384,7 +384,7 @@ writeLines(
     "## Outputs",
     "- `OUTPUT/NON_30min_gapfill_prediction_grid.csv`",
     "- `OUTPUT/NON_30min_gapfill_monthly_budgets.csv`",
-    "- `OUTPUT/NON_30min_gapfill_annual_budgets.csv`",
+    "- `OUTPUT/NEON_30min_gapfill_annual_budgets.csv`",
     "- `OUTPUT/NON_30min_gapfill_class_changes.csv`",
     "- `OUTPUT/NON_30min_gapfill_observed_vs_annual_class_changes.csv`"
   ),

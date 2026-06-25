@@ -20,7 +20,7 @@ dir.create("OUTPUT", showWarnings = FALSE)
 dir.create("FIGURES", showWarnings = FALSE)
 
 monthly_file <- "OUTPUT/NON_30min_gapfill_monthly_budgets.csv"
-annual_file <- "OUTPUT/NON_30min_gapfill_annual_budgets.csv"
+annual_file <- "OUTPUT/NEON_30min_gapfill_annual_budgets.csv"
 site_driver_file <- "OUTPUT/NEON_site_driver_values_for_sink_comparison.csv"
 multivariate_matrix_file <- "OUTPUT/NEON_site_attribute_multivariate_matrix.csv"
 variable_quality_file <- "OUTPUT/NEON_site_attribute_variables_used.csv"
@@ -33,11 +33,11 @@ if (length(missing_files) > 0) {
        ". Run NON.30min.Gapfill.r and NEON.StrongSink.DriverComparison.R first.")
 }
 
-behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
+behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
 behavior_colors <- c(
-  "Consistent sink" = "#2166AC",
+  "Weak-sink" = "#2166AC",
   "Fluctuating" = "#4D4D4D",
-  "Consistent source" = "#B2182B"
+  "Weak-source" = "#B2182B"
 )
 consistency_colors <- c("Consistent" = "#2166AC", "Fluctuating" = "#4D4D4D")
 
@@ -243,9 +243,9 @@ plot_monthly_budget_heatmap <- monthly_plot_data %>%
   geom_tile(color = "white", linewidth = 0.15) +
   facet_grid(standardized_behavior ~ ., scales = "free_y", space = "free_y", drop = TRUE) +
   scale_fill_gradient2(
-    low = behavior_colors[["Consistent sink"]],
+    low = behavior_colors[["Weak-sink"]],
     mid = "white",
-    high = behavior_colors[["Consistent source"]],
+    high = behavior_colors[["Weak-source"]],
     midpoint = 0
   ) +
   labs(
@@ -268,8 +268,8 @@ plot_source_probability_heatmap <- monthly_plot_data %>%
   geom_tile(color = "white", linewidth = 0.15) +
   facet_grid(standardized_behavior ~ ., scales = "free_y", space = "free_y", drop = TRUE) +
   scale_fill_gradient(
-    low = behavior_colors[["Consistent sink"]],
-    high = behavior_colors[["Consistent source"]],
+    low = behavior_colors[["Weak-sink"]],
+    high = behavior_colors[["Weak-source"]],
     limits = c(0, 1)
   ) +
   labs(

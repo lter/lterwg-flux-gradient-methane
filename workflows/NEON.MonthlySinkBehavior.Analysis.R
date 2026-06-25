@@ -20,7 +20,7 @@ required_files <- c(
   "OUTPUT/30min_site_behavior.csv",
   "OUTPUT/NON_30min_gapfill_monthly_budgets.csv",
   "OUTPUT/NON_30min_gapfill_prediction_grid.csv",
-  "OUTPUT/NON_30min_gapfill_annual_budgets.csv"
+  "OUTPUT/NEON_30min_gapfill_annual_budgets.csv"
 )
 
 missing_files <- required_files[!file.exists(required_files)]
@@ -28,11 +28,11 @@ if (length(missing_files) > 0) {
   stop("Missing required files: ", paste(missing_files, collapse = ", "))
 }
 
-behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
+behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
 behavior_colors <- c(
-  "Consistent sink" = "#B2182B",
+  "Weak-sink" = "#B2182B",
   "Fluctuating" = "#4D4D4D",
-  "Consistent source" = "#2166AC"
+  "Weak-source" = "#2166AC"
 )
 sink_source_colors <- c("Sink month" = "#B2182B", "Source month" = "#2166AC")
 season_colors <- c(
@@ -86,7 +86,7 @@ standardized_monthly <- read.csv("OUTPUT/NON_30min_gapfill_monthly_budgets.csv")
     monthly_budget_gC_m2 = budget_mean_mgC_m2_month / 1000
   )
 
-standardized_annual <- read.csv("OUTPUT/NON_30min_gapfill_annual_budgets.csv") %>%
+standardized_annual <- read.csv("OUTPUT/NEON_30min_gapfill_annual_budgets.csv") %>%
   mutate(
     SITE_ID = as.character(SITE_ID),
     standardized_behavior = factor(standardized_behavior, levels = behavior_levels)

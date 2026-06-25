@@ -20,7 +20,7 @@ dir.create("OUTPUT", showWarnings = FALSE)
 dir.create("FIGURES", showWarnings = FALSE)
 
 site_driver_file <- "OUTPUT/NEON_site_driver_values_for_sink_comparison.csv"
-standardized_budget_file <- "OUTPUT/NON_30min_gapfill_annual_budgets.csv"
+standardized_budget_file <- "OUTPUT/NEON_30min_gapfill_annual_budgets.csv"
 
 if (!file.exists(site_driver_file)) {
   stop("Missing OUTPUT/NEON_site_driver_values_for_sink_comparison.csv. Run NEON.StrongSink.DriverComparison.R first.")
@@ -29,7 +29,7 @@ if (!file.exists(site_driver_file)) {
 site_drivers <- read.csv(site_driver_file) %>%
   mutate(
     SITE_ID = as.character(SITE_ID),
-    CH4_behavior = factor(CH4_behavior, levels = c("Consistent sink", "Fluctuating", "Consistent source"))
+    CH4_behavior = factor(CH4_behavior, levels = c("Weak-sink", "Fluctuating", "Weak-source"))
   )
 
 canopy_file <- file.path(localdir, "canopy_commbined.csv")
@@ -70,13 +70,13 @@ if (file.exists(standardized_budget_file)) {
       SITE_ID = as.character(SITE_ID),
       standardized_behavior = factor(
         standardized_behavior,
-        levels = c("Consistent sink", "Fluctuating", "Consistent source")
+        levels = c("Weak-sink", "Fluctuating", "Weak-source")
       )
     )
 } else {
   standardized_behavior <- tibble(
     SITE_ID = character(),
-    standardized_behavior = factor(levels = c("Consistent sink", "Fluctuating", "Consistent source"))
+    standardized_behavior = factor(levels = c("Weak-sink", "Fluctuating", "Weak-source"))
   )
 }
 
@@ -235,7 +235,7 @@ write.csv(silhouette_summary, "OUTPUT/NEON_site_attribute_cluster_silhouette.csv
 write.csv(cluster_behavior_table, "OUTPUT/NEON_site_attribute_cluster_behavior_table.csv", row.names = FALSE)
 write.csv(permanova_results, "OUTPUT/NEON_site_attribute_permanova.csv", row.names = FALSE)
 
-behavior_colors <- c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4")
+behavior_colors <- c("Weak-sink" = "red3", "Fluctuating" = "grey35", "Weak-source" = "blue4")
 standardized_colors <- c(behavior_colors, "Not available" = "grey80")
 
 top_loading_labels <- pca_loadings %>%

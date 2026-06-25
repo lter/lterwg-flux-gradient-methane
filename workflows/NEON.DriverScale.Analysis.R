@@ -32,12 +32,12 @@ n_boot <- as.integer(Sys.getenv("NEON_DRIVER_BOOT_N", unset = "20"))
 min_abs_flux <- 1e-9
 seconds_per_30min <- 30 * 60
 ug_c_per_umol_c <- 12.011
-source_threshold <- 0.75
-behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
+source_threshold <- 1
+behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
 behavior_colors <- c(
-  "Consistent sink" = "#2166AC",
+  "Weak-sink" = "#2166AC",
   "Fluctuating" = "#4D4D4D",
-  "Consistent source" = "#B2182B"
+  "Weak-source" = "#B2182B"
 )
 scale_levels <- c("30min", "daily", "annual")
 scale_labels <- c("30min" = "30 min", "daily" = "Daily", "annual" = "Annual")
@@ -244,13 +244,13 @@ site_behavior_core <- monthly_site_ch4 %>%
   ) %>%
   mutate(
     CH4_behavior = case_when(
-      prop_source_months >= source_threshold ~ "Consistent source",
-      prop_source_months <= 1 - source_threshold ~ "Consistent sink",
+      prop_source_months >= source_threshold ~ "Weak-source",
+      prop_source_months <= 1 - source_threshold ~ "Weak-sink",
       TRUE ~ "Fluctuating"
     ),
     CH4_gradient_behavior = case_when(
-      prop_source_gradient_months >= source_threshold ~ "Consistent source",
-      prop_source_gradient_months <= 1 - source_threshold ~ "Consistent sink",
+      prop_source_gradient_months >= source_threshold ~ "Weak-source",
+      prop_source_gradient_months <= 1 - source_threshold ~ "Weak-sink",
       TRUE ~ "Fluctuating"
     ),
     behavior_changed_from_gradient = CH4_behavior != CH4_gradient_behavior,
@@ -336,10 +336,10 @@ ch4_30min_raw <- ch4_30min_raw %>%
     EcoType = factor(EcoType)
   )
 
-readr::write_csv(monthly_site_ch4, output_path("30min_monthly_site_ch4.csv"))
-readr::write_csv(halfhour_site_month_ch4, output_path("30min_halfhour_balancing_bins.csv"))
-readr::write_csv(site_behavior, output_path("30min_site_behavior.csv"))
-readr::write_csv(component_behavior_comparison, output_path("30min_total_vs_gradient_behavior_comparison.csv"))
+# readr::write_csv(monthly_site_ch4, output_path("30min_monthly_site_ch4.csv"))
+# readr::write_csv(halfhour_site_month_ch4, output_path("30min_halfhour_balancing_bins.csv"))
+# readr::write_csv(site_behavior, output_path("30min_site_behavior.csv"))
+# readr::write_csv(component_behavior_comparison, output_path("30min_total_vs_gradient_behavior_comparison.csv"))
 
 temporal_30min_drivers <- c("Tair_C", "VSWCMean", "log_PAR")
 
@@ -551,10 +551,10 @@ daily_scaled_vs_lookup <- daily_scaled_flux %>%
     daily_lookup_to_scaled_ratio = daily_lookup_mgC_m2_day / daily_scaled_mgC_m2_day
   )
 
-readr::write_csv(site_hour_lookup, output_path("NEON_driver_daily_site_halfhour_lookup.csv"))
-readr::write_csv(daily_lookup_grid, output_path("NEON_driver_daily_lookup_grid.csv"))
-readr::write_csv(daily_lookup_flux, output_path("NEON_driver_daily_lookup_flux_all_sites.csv"))
-readr::write_csv(daily_scaled_vs_lookup, output_path("NEON_driver_daily_scaled_vs_lookup_comparison.csv"))
+# readr::write_csv(site_hour_lookup, output_path("NEON_driver_daily_site_halfhour_lookup.csv"))
+# readr::write_csv(daily_lookup_grid, output_path("NEON_driver_daily_lookup_grid.csv"))
+# readr::write_csv(daily_lookup_flux, output_path("NEON_driver_daily_lookup_flux_all_sites.csv"))
+# readr::write_csv(daily_scaled_vs_lookup, output_path("NEON_driver_daily_scaled_vs_lookup_comparison.csv"))
 
 daily_drivers <- ch4_30min_raw %>%
   filter(!is.na(Date)) %>%
@@ -646,8 +646,8 @@ daily_behavior <- daily_driver_data %>%
   ) %>%
   mutate(
     CH4_daily_behavior = case_when(
-      prop_source_daily >= source_threshold ~ "Consistent source",
-      prop_source_daily <= 1 - source_threshold ~ "Consistent sink",
+      prop_source_daily >= source_threshold ~ "Weak-source",
+      prop_source_daily <= 1 - source_threshold ~ "Weak-sink",
       TRUE ~ "Fluctuating"
     ),
     CH4_daily_behavior = factor(CH4_daily_behavior, levels = behavior_levels)
@@ -664,8 +664,8 @@ annual_behavior <- annual_era5_driver_data %>%
   ) %>%
   mutate(
     CH4_annual_behavior = case_when(
-      prop_source_annual >= source_threshold ~ "Consistent source",
-      prop_source_annual <= 1 - source_threshold ~ "Consistent sink",
+      prop_source_annual >= source_threshold ~ "Weak-source",
+      prop_source_annual <= 1 - source_threshold ~ "Weak-sink",
       TRUE ~ "Fluctuating"
     ),
     CH4_annual_behavior = factor(CH4_annual_behavior, levels = behavior_levels)
@@ -741,17 +741,17 @@ class_change_30min_annual <- source_sink_scale_summary %>%
     fill = list(n_sites = 0L)
   )
 
-readr::write_csv(daily_behavior, output_path("NEON_driver_scale_daily_behavior.csv"))
-readr::write_csv(annual_behavior, output_path("NEON_driver_scale_annual_behavior.csv"))
-readr::write_csv(source_sink_scale_summary, output_path("NEON_driver_scale_source_sink_summary.csv"))
-readr::write_csv(source_sink_counts, output_path("NEON_driver_scale_source_sink_counts.csv"))
-readr::write_csv(class_change_30min_daily, output_path("NEON_driver_scale_class_change_30min_to_daily.csv"))
-readr::write_csv(class_change_daily_annual, output_path("NEON_driver_scale_class_change_daily_to_annual.csv"))
-readr::write_csv(class_change_30min_annual, output_path("NEON_driver_scale_class_change_30min_to_annual.csv"))
+# readr::write_csv(daily_behavior, output_path("NEON_driver_scale_daily_behavior.csv"))
+# readr::write_csv(annual_behavior, output_path("NEON_driver_scale_annual_behavior.csv"))
+# readr::write_csv(source_sink_scale_summary, output_path("NEON_driver_scale_source_sink_summary.csv"))
+# readr::write_csv(source_sink_counts, output_path("NEON_driver_scale_source_sink_counts.csv"))
+# readr::write_csv(class_change_30min_daily, output_path("NEON_driver_scale_class_change_30min_to_daily.csv"))
+# readr::write_csv(class_change_daily_annual, output_path("NEON_driver_scale_class_change_daily_to_annual.csv"))
+# readr::write_csv(class_change_30min_annual, output_path("NEON_driver_scale_class_change_30min_to_annual.csv"))
 
-readr::write_csv(driver_30min_data, output_path("NEON_driver_scale_30min_driver_data.csv"))
-readr::write_csv(daily_driver_data, output_path("NEON_driver_scale_daily_driver_data.csv"))
-readr::write_csv(annual_era5_driver_data, output_path("NEON_driver_scale_annual_era5_driver_data.csv"))
+# readr::write_csv(driver_30min_data, output_path("NEON_driver_scale_30min_driver_data.csv"))
+# readr::write_csv(daily_driver_data, output_path("NEON_driver_scale_daily_driver_data.csv"))
+# readr::write_csv(annual_era5_driver_data, output_path("NEON_driver_scale_annual_era5_driver_data.csv"))
 
 scale_specs <- list(
   `30min` = list(
@@ -865,7 +865,7 @@ model_summary <- purrr::imap_dfr(scale_specs, function(spec, scale_name) {
 }) %>%
   mutate(scale = factor(scale, levels = scale_levels, labels = scale_labels))
 
-readr::write_csv(model_summary, output_path("NEON_driver_scale_model_summary.csv"))
+# readr::write_csv(model_summary, output_path("NEON_driver_scale_model_summary.csv"))
 
 site_boot_weights <- function(data) {
   sites <- levels(factor(data$SITE_ID))
@@ -952,7 +952,7 @@ bootstrap_importance <- purrr::imap_dfr(scale_specs, function(spec, scale_name) 
 })
 
 importance_all <- bind_rows(importance_base, bootstrap_importance)
-readr::write_csv(importance_all, output_path("NEON_driver_scale_variable_importance_bootstrap.csv"))
+# readr::write_csv(importance_all, output_path("NEON_driver_scale_variable_importance_bootstrap.csv"))
 
 importance_summary <- importance_all %>%
   filter(bootstrap > 0) %>%
@@ -967,7 +967,7 @@ importance_summary <- importance_all %>%
   mutate(scale = factor(scale, levels = scale_levels, labels = scale_labels)) %>%
   arrange(response, scale, desc(importance_median))
 
-readr::write_csv(importance_summary, output_path("NEON_driver_scale_variable_importance_summary.csv"))
+# readr::write_csv(importance_summary, output_path("NEON_driver_scale_variable_importance_summary.csv"))
 
 make_reference_row <- function(data) {
   reference <- data[1, , drop = FALSE]
@@ -1035,7 +1035,7 @@ partial_effects <- purrr::imap_dfr(scale_specs, function(spec, scale_name) {
 }) %>%
   mutate(scale = factor(scale, levels = scale_levels, labels = scale_labels))
 
-readr::write_csv(partial_effects, output_path("NEON_driver_scale_partial_effects.csv"))
+# readr::write_csv(partial_effects, output_path("NEON_driver_scale_partial_effects.csv"))
 
 driver_scale_summary <- importance_summary %>%
   mutate(
@@ -1059,7 +1059,7 @@ driver_scale_summary <- importance_summary %>%
   mutate(acts_at_scales = if_else(acts_at_scales == "", "none", acts_at_scales)) %>%
   arrange(response, desc(max_importance_median))
 
-readr::write_csv(driver_scale_summary, output_path("NEON_driver_scale_cross_scale_summary.csv"))
+# readr::write_csv(driver_scale_summary, output_path("NEON_driver_scale_cross_scale_summary.csv"))
 
 plot_importance <- importance_summary %>%
   mutate(
@@ -1088,21 +1088,21 @@ plot_importance <- importance_summary %>%
     legend.position = "bottom"
   )
 
-ggsave(
-  figure_path("NEON_driver_scale_variable_importance.png"),
-  plot = plot_importance,
-  width = 12,
-  height = 8,
-  units = "in",
-  dpi = 300
-)
-ggsave(
-  figure_path("NEON_driver_scale_variable_importance.pdf"),
-  plot = plot_importance,
-  width = 12,
-  height = 8,
-  units = "in"
-)
+# ggsave(
+#   figure_path("NEON_driver_scale_variable_importance.png"),
+#   plot = plot_importance,
+#   width = 12,
+#   height = 8,
+#   units = "in",
+#   dpi = 300
+# )
+# ggsave(
+#   figure_path("NEON_driver_scale_variable_importance.pdf"),
+#   plot = plot_importance,
+#   width = 12,
+#   height = 8,
+#   units = "in"
+# )
 
 plot_partials <- partial_effects %>%
   mutate(
@@ -1130,21 +1130,21 @@ plot_partials <- partial_effects %>%
     panel.grid.minor = element_blank()
   )
 
-ggsave(
-  figure_path("NEON_driver_scale_partial_effects.png"),
-  plot = plot_partials,
-  width = 16,
-  height = 11,
-  units = "in",
-  dpi = 300
-)
-ggsave(
-  figure_path("NEON_driver_scale_partial_effects.pdf"),
-  plot = plot_partials,
-  width = 16,
-  height = 11,
-  units = "in"
-)
+# ggsave(
+#   figure_path("NEON_driver_scale_partial_effects.png"),
+#   plot = plot_partials,
+#   width = 16,
+#   height = 11,
+#   units = "in",
+#   dpi = 300
+# )
+# ggsave(
+#   figure_path("NEON_driver_scale_partial_effects.pdf"),
+#   plot = plot_partials,
+#   width = 16,
+#   height = 11,
+#   units = "in"
+# )
 
 plot_source_sink_counts <- source_sink_counts %>%
   ggplot(aes(x = scale, y = n_sites, fill = behavior)) +
@@ -1162,21 +1162,21 @@ plot_source_sink_counts <- source_sink_counts %>%
     legend.position = "bottom"
   )
 
-ggsave(
-  figure_path("NEON_driver_scale_source_sink_counts.png"),
-  plot = plot_source_sink_counts,
-  width = 7,
-  height = 5,
-  units = "in",
-  dpi = 300
-)
-ggsave(
-  figure_path("NEON_driver_scale_source_sink_counts.pdf"),
-  plot = plot_source_sink_counts,
-  width = 7,
-  height = 5,
-  units = "in"
-)
+# ggsave(
+#   figure_path("NEON_driver_scale_source_sink_counts.png"),
+#   plot = plot_source_sink_counts,
+#   width = 7,
+#   height = 5,
+#   units = "in",
+#   dpi = 300
+# )
+# ggsave(
+#   figure_path("NEON_driver_scale_source_sink_counts.pdf"),
+#   plot = plot_source_sink_counts,
+#   width = 7,
+#   height = 5,
+#   units = "in"
+# )
 
 plot_transition_matrix <- function(data, x_col, y_col, title, x_lab, y_lab) {
   data %>%
@@ -1231,21 +1231,21 @@ plot_source_sink_transitions <- (
   plot_layout(guides = "collect") &
   theme(legend.position = "bottom")
 
-ggsave(
-  figure_path("NEON_driver_scale_source_sink_transitions.png"),
-  plot = plot_source_sink_transitions,
-  width = 11,
-  height = 4.5,
-  units = "in",
-  dpi = 300
-)
-ggsave(
-  figure_path("NEON_driver_scale_source_sink_transitions.pdf"),
-  plot = plot_source_sink_transitions,
-  width = 11,
-  height = 4.5,
-  units = "in"
-)
+# ggsave(
+#   figure_path("NEON_driver_scale_source_sink_transitions.png"),
+#   plot = plot_source_sink_transitions,
+#   width = 11,
+#   height = 4.5,
+#   units = "in",
+#   dpi = 300
+# )
+# ggsave(
+#   figure_path("NEON_driver_scale_source_sink_transitions.pdf"),
+#   plot = plot_source_sink_transitions,
+#   width = 11,
+#   height = 4.5,
+#   units = "in"
+# )
 
 scale_counts <- bind_rows(
   tibble(scale = "30min", n_rows = nrow(driver_30min_data), n_sites = n_distinct(driver_30min_data$SITE_ID)),
@@ -1298,6 +1298,6 @@ summary_lines <- c(
   "- `FIGURES/NEON_driver_scale_partial_effects.png`"
 )
 
-writeLines(summary_lines, output_path("NEON_driver_scale_analysis_results.md"))
+# writeLines(summary_lines, output_path("NEON_driver_scale_analysis_results.md"))
 
-message("Wrote NEON driver scale analysis outputs.")
+message("NEON driver scale analysis complete (file outputs disabled).")

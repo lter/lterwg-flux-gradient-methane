@@ -21,7 +21,7 @@ required_files <- c(
   "OUTPUT/30min_site_behavior.csv",
   "OUTPUT/NEON_strong_sink_driver_comparison.csv",
   "OUTPUT/NEON_site_driver_values_for_sink_comparison.csv",
-  "OUTPUT/NON_30min_gapfill_annual_budgets.csv",
+  "OUTPUT/NEON_30min_gapfill_annual_budgets.csv",
   "OUTPUT/NON_30min_gapfill_monthly_budgets.csv",
   "OUTPUT/NEON_consistency_magnitude_predictor_scores.csv",
   "OUTPUT/NEON_consistency_magnitude_tree_importance.csv"
@@ -34,11 +34,11 @@ if (length(missing_files) > 0) {
 
 load("OUTPUT/30min_ch4_models.Rdata")
 
-behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
+behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
 behavior_colors <- c(
-  "Consistent sink" = "#2166AC",
+  "Weak-sink" = "#2166AC",
   "Fluctuating" = "#4D4D4D",
-  "Consistent source" = "#B2182B"
+  "Weak-source" = "#B2182B"
 )
 driver_group_colors <- c(
   "Moisture" = "#1B9E77",
@@ -81,7 +81,7 @@ site_drivers <- read.csv("OUTPUT/NEON_site_driver_values_for_sink_comparison.csv
     behavior_comparison = factor(behavior_comparison)
   )
 
-annual_budgets <- read.csv("OUTPUT/NON_30min_gapfill_annual_budgets.csv") %>%
+annual_budgets <- read.csv("OUTPUT/NEON_30min_gapfill_annual_budgets.csv") %>%
   mutate(
     standardized_behavior = factor(standardized_behavior, levels = behavior_levels),
     observed_behavior = factor(observed_behavior, levels = behavior_levels)
@@ -149,7 +149,7 @@ plot_residual_qq <- qq_sample %>%
   geom_abline(
     intercept = median(qq_sample$sample_quantile, na.rm = TRUE),
     slope = IQR(qq_sample$sample_quantile, na.rm = TRUE) / IQR(qq_sample$theoretical_quantile, na.rm = TRUE),
-    color = behavior_colors[["Consistent sink"]],
+    color = behavior_colors[["Weak-sink"]],
     linetype = "dashed"
   ) +
   labs(
@@ -201,7 +201,7 @@ plot_source_calibration <- calibration_data %>%
   ggplot(aes(x = mean_pred, y = observed_source)) +
   geom_abline(slope = 1, intercept = 0, color = "grey50", linetype = "dashed") +
   geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.01, alpha = 0.8) +
-  geom_point(aes(size = n), color = behavior_colors[["Consistent source"]], alpha = 0.85) +
+  geom_point(aes(size = n), color = behavior_colors[["Weak-source"]], alpha = 0.85) +
   scale_size(range = c(2, 6)) +
   coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
   labs(

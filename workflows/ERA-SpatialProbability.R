@@ -40,8 +40,8 @@ if (length(missing_files) > 0) {
   stop("Missing required files: ", paste(missing_files, collapse = ", "))
 }
 
-source_threshold <- 0.75
-sink_threshold <- 0.25
+source_threshold <- 1
+sink_threshold <- 0
 source_probability_threshold_default <- 0.80
 gmb_soil_sink_tg_ch4_yr <- -35
 
@@ -198,8 +198,8 @@ fit_glm_model <- function(dat, formula, balanced = FALSE) {
 }
 
 condition_model_scenarios <- tibble(
-  model_scenario = c("Unweighted condition model", "Class-balanced condition model"),
-  balanced = c(FALSE, TRUE)
+  model_scenario = "Class-balanced condition model",
+  balanced = TRUE
 )
 
 condition_models <- condition_model_scenarios %>%

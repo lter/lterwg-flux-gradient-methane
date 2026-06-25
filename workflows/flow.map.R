@@ -1,7 +1,7 @@
 
 library(tidyverse)
 library(sf)
-library(AOI)
+library(rnaturalearth)
 library(ggplot2)
 library(colorspace)
 
@@ -15,8 +15,15 @@ meta.val <- read.csv( fs::path('/Volumes/MaloneLab/Research/FluxGradient/',paste
 val.sites.shp <- meta.val %>% st_as_sf(coords = c("LONGITUDE", "LATITUDE"),
                                        crs = 4326) 
 
-Study_AOI <- aoi.usa <- aoi_get(country = c('North America', 'Europe'))
-aoi.usa <- aoi_get(country = c('PR', 'USA'))
+Study_AOI <- rnaturalearth::ne_countries(
+  continent = c("North America"),
+  scale = 50,
+  returnclass = "sf")
+
+aoi.usa <- rnaturalearth::ne_countries(
+  country = c("Puerto Rico", "United States of America"),
+  scale = 50,
+  returnclass = "sf")
 
 
 ggplot() + geom_sf(data = Study_AOI) + 
@@ -67,7 +74,7 @@ write.csv(canopy.info, file.path(paste(localdir, "Val_canopy.csv", sep="/")))
 
 library(tidyverse)
 library(sf)
-library(AOI)
+library(rnaturalearth)
 
 metadata <- read.csv('/Volumes/MaloneLab/Research/FluxGradient/Ameriflux_NEON field-sites.csv') %>% 
   mutate(EcoType = case_when( Vegetation.Abbreviation..IGBP. == 'ENF' ~ 'Forest',
@@ -117,16 +124,20 @@ plot.tower.counts <- ggplot(data=site.att.sf, aes(x=EcoType , col=EcoType, fill=
 
 site.att.sf.ht <- site.att.sf %>% left_join(canopy.Ht, by = 'Site')
 
-World_AOI <- aoi.usa <- aoi_get(country = c('North America', 'South America', "Asia", "Africa", "Austrailia", "Europe") )
+World_AOI <- rnaturalearth::ne_countries(
+  continent = c("North America", "South America", "Asia", "Africa", "Europe", "Oceania"),
+  scale = 50,
+  returnclass = "sf"
+)
 
 library(colorspace)
 
 map <- ggplot() + geom_sf(data = World_AOI, col='white', fill="black") + 
-  geom_sf(data = val.sites.shp %>% filter(SITE_ID != 'FI-Hyy'), fill='transparent', alpha=0.75, col="red", size=3.5) + 
+  #geom_sf(data = val.sites.shp %>% filter(SITE_ID != 'FI-Hyy'), fill='transparent', alpha=0.75, col="red", size=3.5) + 
   geom_sf(data = site.att.sf.ht, size=2.5, alpha =0.85, aes(col = EcoType)) +
-  theme_bw()  + coord_sf(xlim = c(-160, 30), ylim = c(20, 75))+
+  theme_bw()  + coord_sf(xlim = c(-160, -40), ylim = c(10, 75))+
   scale_color_discrete_sequential(palette = "Hawaii", name="") + theme(text = element_text(size = 20))
-
+map
 # See palattes:
 hcl_palettes(type = "sequential")
 
@@ -135,4 +146,3 @@ library(ggpubr)
 final.plot <- ggarrange(map , plot.tower.counts, ncol=1, common.legend = TRUE)
 
 ggsave("FIGURES/Map_plot.png", plot = final.plot, width = 7.6, height = 7.3, units = "in")
-

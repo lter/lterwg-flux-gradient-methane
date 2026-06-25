@@ -32,7 +32,7 @@ tref_c <- 10
 site_behavior <- read.csv(site_behavior_file) %>%
   mutate(
     SITE_ID = as.character(SITE_ID),
-    CH4_behavior = factor(CH4_behavior, levels = c("Consistent sink", "Fluctuating", "Consistent source"))
+    CH4_behavior = factor(CH4_behavior, levels = c("Weak-sink", "Fluctuating", "Weak-source"))
   )
 
 required_model_cols <- c(
@@ -69,7 +69,7 @@ ch4_30min <- ch4_30min_raw %>%
     season = factor(season, levels = c("Winter", "Spring", "Summer", "Autumn")),
     SITE_ID = factor(SITE_ID),
     EcoType = factor(EcoType),
-    CH4_behavior = factor(CH4_behavior, levels = c("Consistent sink", "Fluctuating", "Consistent source")),
+    CH4_behavior = factor(CH4_behavior, levels = c("Weak-sink", "Fluctuating", "Weak-source")),
     source_30min = as.logical(source_30min),
     positive_CH4 = CH4_mgC_30min > 0,
     sink_CH4 = CH4_mgC_30min < 0,
@@ -399,7 +399,7 @@ plot_q10_behavior <- apparent_q10 %>%
   geom_jitter(width = 0.15, alpha = 0.65, size = 1.8) +
   facet_wrap(~regime + season, scales = "free_y") +
   theme_bw() +
-  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  scale_color_manual(values = c("Weak-sink" = "red3", "Fluctuating" = "grey35", "Weak-source" = "blue4"), na.translate = FALSE) +
   labs(x = "", y = "Apparent Q10", color = "Site behavior") +
   theme(
     strip.background = element_rect(fill = "transparent", color = "black"),
@@ -420,7 +420,7 @@ plot_q10_vswc <- apparent_q10 %>%
   geom_smooth(method = "lm", se = TRUE, color = "black") +
   facet_wrap(~regime, scales = "free_y") +
   theme_bw() +
-  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  scale_color_manual(values = c("Weak-sink" = "red3", "Fluctuating" = "grey35", "Weak-source" = "blue4"), na.translate = FALSE) +
   labs(x = "Mean site-season VSWC", y = "Apparent Q10", color = "Site behavior")
 
 ggsave("FIGURES/NEON_DIEL_Analysis2_Q10_vs_VSWC.png", plot = plot_q10_vswc, width = 8, height = 5, units = "in")
@@ -439,7 +439,7 @@ plot_two_part_hour <- hour_grid %>%
   geom_line(linewidth = 1) +
   facet_wrap(~response, scales = "free_y", ncol = 1) +
   theme_bw() +
-  scale_color_manual(values = c("Consistent sink" = "red3", "Fluctuating" = "grey35", "Consistent source" = "blue4"), na.translate = FALSE) +
+  scale_color_manual(values = c("Weak-sink" = "red3", "Fluctuating" = "grey35", "Weak-source" = "blue4"), na.translate = FALSE) +
   labs(x = "Hour", y = "Model prediction", color = "Site behavior")
 
 ggsave("FIGURES/NEON_DIEL_Analysis2_two_part_hourly_predictions.png", plot = plot_two_part_hour, width = 8, height = 8.5, units = "in")

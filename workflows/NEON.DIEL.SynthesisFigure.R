@@ -63,11 +63,11 @@ check_required_cols(site_behavior_raw, required_behavior_cols, site_behavior_fil
 check_required_cols(driver_predictions_raw, required_driver_prediction_cols, driver_prediction_file)
 check_required_cols(q10_summary_raw, required_q10_summary_cols, q10_summary_file)
 
-behavior_levels <- c("Consistent sink", "Fluctuating", "Consistent source")
+behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
 behavior_colors <- c(
-  "Consistent sink" = "red3",
+  "Weak-sink" = "red3",
   "Fluctuating" = "grey35",
-  "Consistent source" = "blue4"
+  "Weak-source" = "blue4"
 )
 
 driver_labels <- c(

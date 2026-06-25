@@ -36,6 +36,8 @@ era5_30min_file <- "OUTPUT/NEON_ERA5_gapfilled_30min.csv.gz"
 era5_annual_file <- "OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv"
 site_behavior_file <- "OUTPUT/30min_site_behavior.csv"
 area_assumption_file <- "OUTPUT/ERA_Upscaling_ecosystem_area_assumptions.csv"
+# Output from NEON.FLUXNET.CH4FluxComparison.R — includes SMUD chamber data
+comparison_file <- "OUTPUT/CH4_flux_medians_by_source_and_behavior.csv"
 
 required_files <- c(era5_30min_file, era5_annual_file, site_behavior_file)
 missing_files <- required_files[!file.exists(required_files)]
@@ -393,6 +395,33 @@ literature_rate_references <- chamber_process_sink_reference %>%
   ) %>%
   arrange(EcoType)
 
+# Derive sink rate from NEON.FLUXNET.CH4FluxComparison output (includes SMUD chamber data).
+# Uses Chambers Weak-sink median; SE estimated from IQR.
+observed_chamber_sink <- if (file.exists(comparison_file)) {
+  comp <- read.csv(comparison_file) %>%
+    mutate(behavior = gsub("-", " ", behavior))  # "Weak-sink" -> "Weak sink"
+
+  sink_row <- comp %>%
+    filter(source_label == "Chambers", behavior == "Weak sink")
+
+  if (nrow(sink_row) == 1) {
+    sink_row %>%
+      transmute(
+        sink_rate_gC_m2_yr     = median_mgC_m2_day * 365 / 1000,
+        sink_se_gC_m2_yr       = (abs(q75_mgC_m2_day - q25_mgC_m2_day) / 1.349) /
+                                   sqrt(n) * 365 / 1000,
+        n_chamber_references   = n,
+        source_label
+      )
+  } else {
+    message("Could not extract Chambers Weak-sink row from comparison file; skipping observed-chamber scenario.")
+    NULL
+  }
+} else {
+  message("Comparison file not found; skipping observed-chamber rate scenario.")
+  NULL
+}
+
 stage2_rate_scenarios <- bind_rows(
     stage2_rate_by_ecotype_class %>%
       mutate(
@@ -430,6 +459,47 @@ stage2_rate_scenarios <- bind_rows(
     external_sink_rate_gC_m2_yr, external_sink_se_gC_m2_yr,
     calibration_note
   )
+
+# Append observed NEON+SMUD chamber sink scenario if comparison data is available.
+# Uses a single pooled chamber sink rate (uniform across EcoTypes) with NEON ERA5 source rates.
+if (!is.null(observed_chamber_sink)) {
+  obs_chamber_scenario <- stage2_rate_by_ecotype_class %>%
+    mutate(
+      rate_scenario = "Observed NEON+SMUD chamber sink + NEON source",
+      external_sink_rate_gC_m2_yr = observed_chamber_sink$sink_rate_gC_m2_yr,
+      external_sink_se_gC_m2_yr   = observed_chamber_sink$sink_se_gC_m2_yr,
+      calibrated_rate_gC_m2_yr = if_else(
+        exchange_class == "Weak sink",
+        observed_chamber_sink$sink_rate_gC_m2_yr,
+        model_rate_gC_m2_yr
+      ),
+      calibrated_rate_se_gC_m2_yr = if_else(
+        exchange_class == "Weak sink",
+        observed_chamber_sink$sink_se_gC_m2_yr,
+        model_rate_se_gC_m2_yr
+      ),
+      calibration_note = if_else(
+        exchange_class == "Weak sink",
+        paste0(
+          "Weak-sink rate from NEON+SMUD chamber observations (median ",
+          round(observed_chamber_sink$sink_rate_gC_m2_yr, 4),
+          " gC/m2/yr, n=", observed_chamber_sink$n_chamber_references,
+          "); uniform across EcoTypes. Weak-source and fluctuating rates from NEON ERA5."
+        ),
+        "NEON ERA5 stage-2 annual flux model retained for non-sink class."
+      )
+    ) %>%
+    dplyr::select(
+      rate_scenario, EcoType, exchange_class, n_site_years, n_sites,
+      observed_mean_gC_m2_yr, observed_median_gC_m2_yr, observed_sd_gC_m2_yr,
+      model_rate_gC_m2_yr, model_rate_se_gC_m2_yr,
+      calibrated_rate_gC_m2_yr, calibrated_rate_se_gC_m2_yr,
+      external_sink_rate_gC_m2_yr, external_sink_se_gC_m2_yr,
+      calibration_note
+    )
+
+  stage2_rate_scenarios <- bind_rows(stage2_rate_scenarios, obs_chamber_scenario)
+}
 
 if (!file.exists(area_assumption_file)) {
   area_assumptions <- tibble(
