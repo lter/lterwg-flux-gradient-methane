@@ -111,8 +111,8 @@ gC_m2_yr_to_tg_ch4 <- function(flux_gC_m2_yr, area_mha) {
 }
 
 model_colors <- c(
-  "Binary: hard-threshold + lmer conditional magnitude" = "#1B9E77",
-  "Continuous: P(source) × source mag + (1-P) × sink mag" = "#7570B3"
+  "Binary: hard-threshold + lmer conditional magnitude" = "#E7298A",
+  "Continuous: P(source) × source mag + (1-P) × sink mag" = "#66A61E"
 )
 binary_color     <- model_colors["Binary: hard-threshold + lmer conditional magnitude"]
 continuous_color <- model_colors["Continuous: P(source) × source mag + (1-P) × sink mag"]
@@ -501,13 +501,28 @@ p3a <- annual_expected_flux_2000_2025 %>%
   geom_hline(yintercept = gmb_soil_sink_tg_ch4_yr, color = sink_col,
              linetype = "dashed", linewidth = 0.7) +
   geom_line(linewidth = 0.9) + geom_point(size = 1.6) +
-  annotate("text", x = 2025, y = gmb_soil_sink_tg_ch4_yr - 1.5,
-           label = "GMB sink (–35)", hjust = 1, size = 3.2, color = sink_col) +
   scale_x_continuous(breaks = seq(2000, 2025, by = 5)) +
-  scale_color_manual(values = model_colors) +
+  scale_color_manual(values = model_colors,
+                     labels = c("Binary: hard-threshold + lmer conditional magnitude" = "Binary",
+                                "Continuous: P(source) × source mag + (1-P) × sink mag" = "Continuous")) +
   labs(title = "A. Annual Net Exchange, 2000–2025",
        x = "Year", y = "Net exchange (Tg CH₄ yr⁻¹)", color = NULL) +
   fig_theme
+
+p3a_bar <- annual_expected_flux_2000_2025 %>%
+  filter(Year == 2025) %>%
+  mutate(approach = c("Binary: hard-threshold + lmer conditional magnitude" = "Binary",
+                      "Continuous: P(source) × source mag + (1-P) × sink mag" = "Continuous")[magnitude_model]) %>%
+  ggplot(aes(x = approach, y = annual_net_exchange_tg_ch4_yr, fill = magnitude_model)) +
+  geom_col(width = 0.6, alpha = 0.85) +
+  geom_hline(yintercept = 0, color = "grey35", linewidth = 0.35) +
+  geom_hline(yintercept = gmb_soil_sink_tg_ch4_yr, color = sink_col,
+             linetype = "dashed", linewidth = 0.7) +
+  scale_fill_manual(values = model_colors) +
+  labs(title = "2025 Budget", x = NULL, y = NULL) +
+  fig_theme +
+  theme(legend.position = "none",
+        axis.text.x = element_text(size = 7))
 
 p3b <- budget_by_ecotype_year %>%
   ggplot(aes(x = Year, y = annual_tg, fill = EcoType_plot)) +
@@ -551,10 +566,15 @@ p3c <- threshold_sensitivity %>%
        x = "P(source) threshold", y = "Net exchange (Tg CH₄ yr⁻¹)") +
   fig_theme
 
-fig3 <- plot_grid(p3a, p3b, p3c, ncol = 1, rel_heights = c(1, 1, 1))
+fig3 <- plot_grid(
+  plot_grid(p3a, p3a_bar, ncol = 2, rel_widths = c(1.8, 1)),
+  p3b,
+  p3c,
+  ncol = 1, rel_heights = c(1, 1, 1)
+)
 
 ggsave(file.path(figure_dir, "Fig3_budget.png"),
-  fig3, width = 6.5, height = 8.5, units = "in", dpi = 300, bg = "white")
+  fig3, width = 7.5, height = 8.5, units = "in", dpi = 300, bg = "white")
 
 message("Fig 3 written.")
 
