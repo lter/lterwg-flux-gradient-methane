@@ -11,6 +11,8 @@ library(sf)
 #DirRepo <- 'C:/Users/csturtevant/Documents/Git/lterwg-flux-gradient' # Relative or absolute path to lterwg-flux-gradient git repo on your local machine. Make sure you've pulled the latest from main!
 DirRepo.ch4 <-"/Users/sm3466/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
 
+# Laptop
+DirRepo.ch4 <-"/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
 DirRepo.eval <-"/Users/sm3466/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
 
 setwd(DirRepo.ch4)
@@ -67,8 +69,9 @@ source(fs::path(DirRepo.ch4,'workflows/flow.DIEL.NEON.R'))
 
 #Explains why sites show specific patterns and how those patterns scale temporally-
 source(fs::path(DirRepo.ch4,'workflows/flow.30min.analysis.R'))  # makes files needed below
-source(fs::path(DirRepo.ch4,'workflows/NEON.30min.Gapfill.R')) 
-source(fs::path(DirRepo.ch4,'workflows/NEON.ERA5.HalfHourlyGapfill.R')) # Gapfills the data
+#source(fs::path(DirRepo.ch4,'workflows/NEON.30min.Gapfill.R')) 
+source(fs::path(DirRepo.ch4,'workflows/NEON.ERA5.HalfHourlyGapfill.R')) # Gap-fills the data
+
 
 source(fs::path(DirRepo.ch4,'workflows/flow.plots.R')) # produces figures based NEON Fluxes
 
@@ -79,19 +82,29 @@ source(fs::path(DirRepo.ch4,'workflows/NEON.FLUXNET.CH4FluxComparison.R')) # Ens
 
 # Attempts at upscale for a global budget comparison:
 source(fs::path(DirRepo.ch4,'workflows/ERA-Upscaling.R')) # Not usig this version!
-source(fs::path(DirRepo.ch4,'workflows/NEON.DriveScale.Analysis.R')) # produces needed files
 
 source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialProbability.R')) 
 source(fs::path(DirRepo.ch4,'workflows/Download-ERA5Land-Monthly.R')) 
 source(fs::path(DirRepo.ch4,'workflows/Download-Process-MODIS-WAD2M.R')) 
-source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialUpscaling-Monthly.R')) 
 
-source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialUpscaling-Figures.R'))
+# Random Forest Models 
+source("/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane/workflows/ERA-SpatialUpscaling-Monthly-RF.R")
+source(fs::path(DirRepo.ch4, '/workflows/ERA-SpatialUpscaling-Figures-RF.R'))
 
+# Supplemental 
+source(fs::path(DirRepo.ch4,'workflows/Flux_Justification_Supplement.R'))
+source(fs::path(DirRepo.ch4,'/workflows/Supplemental_GF_Uncertainty.R'))
+source(fs::path(DirRepo.ch4,'/workflows/Supplemental_Budget_Uncertainty.R'))
 
+# Methods
+source(fs::path(DirRepo.ch4,'workflows/flow.map.R'))
 
 # Depreciated Files:
 # Exploratory:
+# GLM Models
+source(fs::path(DirRepo.ch4,'workflows/NEON.DriveScale.Analysis.R')) # produces needed files
+
+source(fs::path(DirRepo.ch4,'workflows/ERA-SpatialUpscaling-Monthly.R')) 
 source(fs::path(DirRepo.ch4,'workflows/NEON.StrongSink.DriverComparison.R'))
 source(fs::path(DirRepo.ch4,'workflows/NEON.DriveScale.Analysis.R')) # fix figure colors!
 source(fs::path(DirRepo.ch4,'workflows/NEON.DIEL.Analysis2.R'))
@@ -101,9 +114,6 @@ source(fs::path(DirRepo.ch4,'workflows/NEON.30min.Gapfill.R')) # I am not sure I
 source(fs::path(DirRepo.ch4,'workflows/NEON.ConsistencyMagnitude.Analysis.R')) # fix figure colors!
 source(fs::path(DirRepo.ch4,'workflows/NEON.TotalFlux.AnnualBudget.R'))
 source(fs::path(DirRepo.ch4,'workflows/NEON.DIEL.SynthesisFigure.R'))
-
-# Original Analysis:
-
 source(fs::path(DirRepo.ch4,'workflows/flow.climate.NEON.R'))
 source(fs::path(DirRepo.ch4,'workflows/flow.soilmoisture.NEON.R'))
 source(fs::path(DirRepo.ch4,'workflows/flow.parms_results.R'))

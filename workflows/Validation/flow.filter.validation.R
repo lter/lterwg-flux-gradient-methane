@@ -4,10 +4,8 @@
 metadata <- read.csv('/Volumes/MaloneLab/Research/FluxGradient/metadata_validation.csv') # has a list of all the sites
 
 # Add local directory for downloaded data here:
-DirRepo <-  "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient"
+DirRepo <-  "/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient"
 
-DirRepo.eval <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
-DirRepo.ch4 <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
 setwd(DirRepo.ch4)
 datadir <- '/Volumes/MaloneLab/Research/FluxGradient/FluxData' # MaloneLab Server
 

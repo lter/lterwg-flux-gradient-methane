@@ -132,17 +132,101 @@ World_AOI <- rnaturalearth::ne_countries(
 
 library(colorspace)
 
-map <- ggplot() + geom_sf(data = World_AOI, col='white', fill="black") + 
-  #geom_sf(data = val.sites.shp %>% filter(SITE_ID != 'FI-Hyy'), fill='transparent', alpha=0.75, col="red", size=3.5) + 
+map <- ggplot() + geom_sf(data = World_AOI, col='white', fill="black") +
+  #geom_sf(data = val.sites.shp %>% filter(SITE_ID != 'FI-Hyy'), fill='transparent', alpha=0.75, col="red", size=3.5) +
   geom_sf(data = site.att.sf.ht, size=2.5, alpha =0.85, aes(col = EcoType)) +
   theme_bw()  + coord_sf(xlim = c(-160, -40), ylim = c(10, 75))+
-  scale_color_discrete_sequential(palette = "Hawaii", name="") + theme(text = element_text(size = 20))
+  scale_color_discrete_sequential(palette = "Hawaii", name="") +
+  labs(tag = "A") +
+  theme(text = element_text(size = 20),
+        plot.tag = element_text(color = "black", face = "bold", size = 14))
 map
 # See palattes:
 hcl_palettes(type = "sequential")
 
 library(ggpubr)
 
-final.plot <- ggarrange(map , plot.tower.counts, ncol=1, common.legend = TRUE)
+# ── Panel C: MAP vs MAT climate space with Aridity Index ──────────────────────
+# De Martonne Aridity Index: AI = MAP / (MAT + 10)
+# AI < 20  → Arid   (aligns with Koeppen B-class sites)
+# AI 20-30 → Semi-arid
+# AI ≥ 30  → Humid
+#
+# Boundary curve in MAP/MAT space: MAP = 20 * (MAT + 10)
 
-ggsave("FIGURES/Map_plot.png", plot = final.plot, width = 7.6, height = 7.3, units = "in")
+climate.data <- metadata %>%
+  rename(
+    MAP_mm  = Mean.Average.Precipitation..mm.,
+    MAT_C   = Mean.Average.Tempurature..degrees.C.,
+    Koeppen = Climate.Class.Abbreviation..Koeppen.
+  ) %>%
+  mutate(
+    MAP_mm  = as.numeric(MAP_mm),
+    MAT_C   = as.numeric(MAT_C),
+    # de Martonne AI is undefined when MAT <= -10 (denominator <= 0); set to NA
+    AI      = if_else(MAT_C + 10 > 0, MAP_mm / (MAT_C + 10), NA_real_),
+    Aridity = case_when(
+      !is.na(AI) & AI <= 15 ~ "Arid",
+      AI <  30              ~ "Semi-arid",
+      TRUE                  ~ "Humid"
+    ),
+    Aridity = factor(Aridity, levels = c("Arid", "Semi-arid", "Humid"))
+  ) %>%
+  filter(!is.na(MAP_mm), !is.na(MAT_C))
+
+# Shade the arid region (MAP < 20*(MAT+10)) across the observed MAT range
+mat_seq    <- seq(min(climate.data$MAT_C, na.rm = TRUE) - 2,
+                  max(climate.data$MAT_C, na.rm = TRUE) + 2, length.out = 200)
+arid_bound <- data.frame(MAT_C = mat_seq, MAP_bound = 15 * (mat_seq + 10))
+
+plot.climate <- ggplot(climate.data, aes(x = MAT_C, y = MAP_mm)) +
+  # Arid shading below the AI = 20 boundary
+  geom_ribbon(data  = arid_bound,
+              aes(x = MAT_C, ymin = 0, ymax = pmax(0, MAP_bound)),
+              inherit.aes = FALSE,
+              fill = "#c8a96e", alpha = 0.18) +
+  # AI = 20 boundary line
+  geom_line(data  = arid_bound,
+            aes(x = MAT_C, y = MAP_bound),
+            inherit.aes = FALSE,
+            linetype = "dashed", color = "white", linewidth = 0.7) +
+  annotate("text", x = max(mat_seq) - 1, y = 15 * (max(mat_seq) + 10) + 80,
+           label = "AI = 15 (arid boundary)", hjust = 1,
+           size = 3.2, color = "white") +
+  # All sites: filled circle colored by EcoType
+  geom_point(aes(color = EcoType), shape = 16, size = 3, alpha = 0.85) +
+  # Arid sites (AI < 20): white outline ring drawn on top to highlight them
+  geom_point(data = filter(climate.data, Aridity == "Arid"),
+             aes(color = EcoType), shape = 21, size = 4,
+             stroke = 1.4, fill = NA, color = "white") +
+  scale_color_discrete_sequential(palette = "Hawaii", name = "") +
+  theme_bw() +
+  theme(
+    panel.background = element_rect(fill = "black", colour = "black"),
+    plot.background  = element_rect(fill = "black", colour = "black"),
+    panel.grid.major = element_line(colour = "grey30"),
+    panel.grid.minor = element_line(colour = "grey10"),
+    axis.text        = element_text(colour = "white"),
+    axis.title       = element_text(colour = "white"),
+    legend.background = element_rect(fill = "black"),
+    legend.text       = element_text(colour = "white"),
+    legend.title      = element_text(colour = "white"),
+    text             = element_text(size = 16)
+  ) +
+  labs(
+    x = "Mean Annual Temperature (°C)",
+    y = "Mean Annual Precipitation (mm)"
+  )
+
+# ── Assemble 3-panel figure ───────────────────────────────────────────────────
+final.plot <- ggarrange(
+  map,
+  ggarrange(plot.tower.counts, plot.climate,
+            ncol = 2, common.legend = FALSE,
+            labels = c("B", "C"), font.label = list(color = "white", size = 14)),
+  nrow          = 2,
+  common.legend = TRUE,
+  legend        = "bottom"
+)
+
+ggsave("FIGURES/Map_plot.png", plot = final.plot, width = 12, height = 10, units = "in")

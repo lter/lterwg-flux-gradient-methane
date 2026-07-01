@@ -9,13 +9,14 @@ library(sf)
 
 # -------------- Change this stuff -------------
 #DirRepo <- 'C:/Users/csturtevant/Documents/Git/lterwg-flux-gradient' # Relative or absolute path to lterwg-flux-gradient git repo on your local machine. Make sure you've pulled the latest from main!
-DirRepo.ch4 <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
+DirRepo.ch4 <- "/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
 
-DirRepo.eval <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
+DirRepo.eval <- "/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
 
 setwd(DirRepo.ch4)
 
-localdir <- '/Volumes/MaloneLab/Research/FluxGradient/FluxData'
+localdir     <- '/Volumes/MaloneLab/Research/FluxGradient'
+localdir.ch4 <- '/Volumes/MaloneLab/Research/FluxGradient/Validation_Sites'
 DnldFromGoogleDrive <- FALSE # Enter TRUE to grab files listed in dnld_files from Google Drive. Enter FALSE if you have the most up-to-date versions locally in localdir
 
 email <- 'sparklelmalone@gmail.com'

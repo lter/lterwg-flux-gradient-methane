@@ -8,7 +8,8 @@
 
 library(tidyverse)
 library(ggplot2)
-library(mgcv)
+library(ranger)
+library(slider)
 library(patchwork)
 library(jsonlite)
 library(data.table)
@@ -117,12 +118,22 @@ if (nrow(site_metadata) == 0) {
 }
 
 fetch_open_meteo_era5_site <- function(site, latitude, longitude, start_date, end_date) {
+  hourly_vars <- paste(
+    "temperature_2m",
+    "soil_moisture_0_to_7cm",
+    "soil_temperature_0_to_7cm",
+    "soil_moisture_7_to_28cm",
+    "precipitation",
+    "shortwave_radiation",
+    "relative_humidity_2m",
+    sep = ","
+  )
   query <- list(
     latitude = latitude,
     longitude = longitude,
     start_date = as.character(start_date),
     end_date = as.character(end_date),
-    hourly = "temperature_2m,soil_moisture_0_to_7cm",
+    hourly = hourly_vars,
     timezone = "UTC",
     models = "era5"
   )
@@ -133,19 +144,25 @@ fetch_open_meteo_era5_site <- function(site, latitude, longitude, start_date, en
 
   parsed <- jsonlite::fromJSON(url)
 
-  if (is.null(parsed$hourly$time) || is.null(parsed$hourly$temperature_2m) ||
-      is.null(parsed$hourly$soil_moisture_0_to_7cm)) {
-    stop("Open-Meteo response did not include expected ERA5 hourly variables for ", site)
+  required_vars <- c("time", "temperature_2m", "soil_moisture_0_to_7cm")
+  missing_vars  <- required_vars[!required_vars %in% names(parsed$hourly)]
+  if (length(missing_vars) > 0) {
+    stop("Open-Meteo response missing variables for ", site, ": ", paste(missing_vars, collapse = ", "))
   }
 
   tibble(
-    SITE_ID = site,
-    time_hour = as.POSIXct(parsed$hourly$time, format = "%Y-%m-%dT%H:%M", tz = "UTC"),
-    ERA5_Tair_C = as.numeric(parsed$hourly$temperature_2m),
-    ERA5_VSWC = as.numeric(parsed$hourly$soil_moisture_0_to_7cm),
-    ERA5_latitude = parsed$latitude,
-    ERA5_longitude = parsed$longitude,
-    ERA5_elevation = parsed$elevation %||% NA_real_
+    SITE_ID          = site,
+    time_hour        = as.POSIXct(parsed$hourly$time, format = "%Y-%m-%dT%H:%M", tz = "UTC"),
+    ERA5_Tair_C      = as.numeric(parsed$hourly$temperature_2m),
+    ERA5_VSWC        = as.numeric(parsed$hourly$soil_moisture_0_to_7cm),
+    ERA5_Tsoil_C     = as.numeric(parsed$hourly$soil_temperature_0_to_7cm   %||% NA_real_),
+    ERA5_VSWC_deep   = as.numeric(parsed$hourly$soil_moisture_7_to_28cm     %||% NA_real_),
+    ERA5_precip_mm   = as.numeric(parsed$hourly$precipitation                %||% NA_real_),
+    ERA5_SW_Wm2      = as.numeric(parsed$hourly$shortwave_radiation          %||% NA_real_),
+    ERA5_RH_pct      = as.numeric(parsed$hourly$relative_humidity_2m        %||% NA_real_),
+    ERA5_latitude    = parsed$latitude,
+    ERA5_longitude   = parsed$longitude,
+    ERA5_elevation   = parsed$elevation %||% NA_real_
   )
 }
 
@@ -164,7 +181,12 @@ if (file.exists(era5_hourly_file)) {
   required_sites <- unique(site_metadata$SITE_ID)
   missing_sites  <- setdiff(required_sites, cached_sites)
 
-  if (cached_start <= start_date && cached_end >= end_date && length(missing_sites) == 0) {
+  required_hourly_cols <- c("ERA5_Tair_C", "ERA5_VSWC", "ERA5_Tsoil_C",
+                             "ERA5_VSWC_deep", "ERA5_precip_mm", "ERA5_SW_Wm2", "ERA5_RH_pct")
+  missing_cols <- setdiff(required_hourly_cols, names(era5_hourly))
+
+  if (cached_start <= start_date && cached_end >= end_date &&
+      length(missing_sites) == 0 && length(missing_cols) == 0) {
     message(
       "Cache covers ", cached_start, " to ", cached_end,
       " for all ", length(cached_sites), " sites — skipping download."
@@ -182,6 +204,11 @@ if (file.exists(era5_hourly_file)) {
       message(
         "Cache is missing ", length(missing_sites), " site(s): ",
         paste(missing_sites, collapse = ", "), ". Re-fetching."
+      )
+    }
+    if (length(missing_cols) > 0) {
+      message(
+        "Cache missing ERA5 columns: ", paste(missing_cols, collapse = ", "), ". Re-fetching."
       )
     }
     era5_hourly <- NULL
@@ -282,7 +309,12 @@ if (file.exists(era5_halfhour_file)) {
   required_sites   <- unique(site_metadata$SITE_ID)
   missing_hh_sites <- setdiff(required_sites, cached_hh_sites)
 
-  if (cached_hh_start <= start_date && cached_hh_end >= end_date && length(missing_hh_sites) == 0) {
+  required_hh_cols <- c("ERA5_Tair_C", "ERA5_VSWC", "ERA5_Tsoil_C",
+                         "ERA5_VSWC_deep", "ERA5_precip_mm", "ERA5_SW_Wm2", "ERA5_RH_pct")
+  missing_hh_cols  <- setdiff(required_hh_cols, names(era5_halfhour))
+
+  if (cached_hh_start <= start_date && cached_hh_end >= end_date &&
+      length(missing_hh_sites) == 0 && length(missing_hh_cols) == 0) {
     message(
       "Half-hour cache covers ", cached_hh_start, " to ", cached_hh_end,
       " for all ", length(cached_hh_sites), " sites — skipping interpolation."
@@ -302,12 +334,23 @@ if (file.exists(era5_halfhour_file)) {
         paste(missing_hh_sites, collapse = ", "), ". Re-interpolating."
       )
     }
+    if (length(missing_hh_cols) > 0) {
+      message(
+        "Half-hour cache missing columns: ", paste(missing_hh_cols, collapse = ", "), ". Re-interpolating."
+      )
+    }
     era5_halfhour <- NULL
   }
 }
 
 if (!era5_halfhour_cache_valid) {
   message("Interpolating hourly ERA5 covariates to 30-minute site-year grid.")
+  # Linear interpolation with fallback to available endpoint
+  era5_interp <- function(floor, ceiling, w)
+    if_else(is.finite(floor) & is.finite(ceiling),
+            floor + w * (ceiling - floor),
+            coalesce(floor, ceiling))
+
   era5_halfhour <- site_year_grid %>%
     mutate(
       time_floor_hour = as.POSIXct(
@@ -320,30 +363,85 @@ if (!era5_halfhour_cache_valid) {
     ) %>%
     left_join(
       era5_hourly %>%
-        dplyr::select(SITE_ID, time_floor_hour = time_hour, ERA5_Tair_C_floor = ERA5_Tair_C, ERA5_VSWC_floor = ERA5_VSWC),
+        dplyr::select(SITE_ID, time_floor_hour = time_hour,
+                      ERA5_Tair_C_floor    = ERA5_Tair_C,
+                      ERA5_VSWC_floor      = ERA5_VSWC,
+                      ERA5_Tsoil_C_floor   = ERA5_Tsoil_C,
+                      ERA5_VSWC_deep_floor = ERA5_VSWC_deep,
+                      ERA5_precip_mm_floor = ERA5_precip_mm,
+                      ERA5_SW_Wm2_floor    = ERA5_SW_Wm2,
+                      ERA5_RH_pct_floor    = ERA5_RH_pct),
       by = c("SITE_ID", "time_floor_hour")
     ) %>%
     left_join(
       era5_hourly %>%
-        dplyr::select(SITE_ID, time_ceiling_hour = time_hour, ERA5_Tair_C_ceiling = ERA5_Tair_C, ERA5_VSWC_ceiling = ERA5_VSWC),
+        dplyr::select(SITE_ID, time_ceiling_hour = time_hour,
+                      ERA5_Tair_C_ceiling    = ERA5_Tair_C,
+                      ERA5_VSWC_ceiling      = ERA5_VSWC,
+                      ERA5_Tsoil_C_ceiling   = ERA5_Tsoil_C,
+                      ERA5_VSWC_deep_ceiling = ERA5_VSWC_deep,
+                      ERA5_precip_mm_ceiling = ERA5_precip_mm,
+                      ERA5_SW_Wm2_ceiling    = ERA5_SW_Wm2,
+                      ERA5_RH_pct_ceiling    = ERA5_RH_pct),
       by = c("SITE_ID", "time_ceiling_hour")
     ) %>%
     mutate(
-      ERA5_Tair_C = if_else(
-        is.finite(ERA5_Tair_C_floor) & is.finite(ERA5_Tair_C_ceiling),
-        ERA5_Tair_C_floor + hour_weight * (ERA5_Tair_C_ceiling - ERA5_Tair_C_floor),
-        coalesce(ERA5_Tair_C_floor, ERA5_Tair_C_ceiling)
-      ),
-      ERA5_VSWC = if_else(
-        is.finite(ERA5_VSWC_floor) & is.finite(ERA5_VSWC_ceiling),
-        ERA5_VSWC_floor + hour_weight * (ERA5_VSWC_ceiling - ERA5_VSWC_floor),
-        coalesce(ERA5_VSWC_floor, ERA5_VSWC_ceiling)
-      )
+      ERA5_Tair_C    = era5_interp(ERA5_Tair_C_floor,    ERA5_Tair_C_ceiling,    hour_weight),
+      ERA5_VSWC      = era5_interp(ERA5_VSWC_floor,      ERA5_VSWC_ceiling,      hour_weight),
+      ERA5_Tsoil_C   = era5_interp(ERA5_Tsoil_C_floor,   ERA5_Tsoil_C_ceiling,   hour_weight),
+      ERA5_VSWC_deep = era5_interp(ERA5_VSWC_deep_floor, ERA5_VSWC_deep_ceiling, hour_weight),
+      ERA5_SW_Wm2    = era5_interp(ERA5_SW_Wm2_floor,    ERA5_SW_Wm2_ceiling,    hour_weight),
+      ERA5_RH_pct    = era5_interp(ERA5_RH_pct_floor,    ERA5_RH_pct_ceiling,    hour_weight),
+      # Precipitation is a rate (mm/hr) — take floor-hour value (no interpolation)
+      ERA5_precip_mm = coalesce(ERA5_precip_mm_floor, ERA5_precip_mm_ceiling)
     ) %>%
-    dplyr::select(SITE_ID, Year, time.rounded, Date, month, doy, hour_num, season, EcoType, ERA5_Tair_C, ERA5_VSWC)
+    dplyr::select(SITE_ID, Year, time.rounded, Date, month, doy, hour_num, season, EcoType,
+                  ERA5_Tair_C, ERA5_VSWC, ERA5_Tsoil_C, ERA5_VSWC_deep,
+                  ERA5_precip_mm, ERA5_SW_Wm2, ERA5_RH_pct)
 
   data.table::fwrite(era5_halfhour, era5_halfhour_file)
 }
+
+# ── Climatological flux lookup tables ────────────────────────────────────────
+# Computed from all observed CH4 half-hours. Three levels of specificity;
+# joined in cascade so the finest available value is used as a predictor.
+# For gap periods the lookup is out-of-sample (no data exists for that slot
+# by definition). For observed training steps the mean includes the target
+# observation (1/n dilution) — acceptable for gap-filling applications.
+
+obs_ch4 <- ch4_30min %>%
+  filter(is.finite(CH4_mgC_30min)) %>%
+  mutate(season = as.character(season))
+
+clim_site_month_hour <- obs_ch4 %>%
+  reframe(
+    .by = c(SITE_ID, month, hour_num),
+    clim_site_month_hour  = mean(CH4_mgC_30min, na.rm = TRUE),
+    n_clim_site_month_hour = n()
+  )
+
+clim_site_season_hour <- obs_ch4 %>%
+  reframe(
+    .by = c(SITE_ID, season, hour_num),
+    clim_site_season_hour = mean(CH4_mgC_30min, na.rm = TRUE)
+  )
+
+clim_site_hour <- obs_ch4 %>%
+  reframe(
+    .by = c(SITE_ID, hour_num),
+    clim_site_hour = mean(CH4_mgC_30min, na.rm = TRUE)
+  )
+
+# Global fallback (month × hour) for sites with no lookup at all
+clim_global_month_hour <- obs_ch4 %>%
+  reframe(
+    .by = c(month, hour_num),
+    clim_global_month_hour = mean(CH4_mgC_30min, na.rm = TRUE)
+  )
+
+message("Climatological lookup tables computed (",
+        nrow(clim_site_month_hour), " site-month-hour cells, ",
+        n_distinct(clim_site_month_hour$SITE_ID), " sites).")
 
 gapfill_data <- era5_halfhour %>%
   left_join(
@@ -351,13 +449,46 @@ gapfill_data <- era5_halfhour %>%
       dplyr::select(SITE_ID, time.rounded, CH4_mgC_30min),
     by = c("SITE_ID", "time.rounded")
   ) %>%
+  # ── Antecedent / derived features (computed per site in temporal order) ──────
+  arrange(SITE_ID, time.rounded) %>%
+  group_by(SITE_ID) %>%
   mutate(
+    # 7-day rolling mean air temperature (336 half-hour steps = 7 × 48)
+    tair_roll7   = slider::slide_dbl(ERA5_Tair_C,    mean, .before = 335L, .complete = FALSE, na_rm = TRUE),
+    # 7-day rolling sum precipitation (mm accumulated over previous 7 days)
+    precip_roll7 = slider::slide_dbl(ERA5_precip_mm, sum,  .before = 335L, .complete = FALSE, na_rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  # ── Climatological lookup joins (cascade: finest available resolution) ────────
+  left_join(
+    clim_site_month_hour %>% dplyr::select(-n_clim_site_month_hour),
+    by = c("SITE_ID", "month", "hour_num")
+  ) %>%
+  left_join(
+    clim_site_season_hour %>%
+      mutate(season = factor(season, levels = c("Winter", "Spring", "Summer", "Autumn"))),
+    by = c("SITE_ID", "season", "hour_num")
+  ) %>%
+  left_join(clim_site_hour,         by = c("SITE_ID", "hour_num")) %>%
+  left_join(clim_global_month_hour, by = c("month",   "hour_num")) %>%
+  mutate(
+    # Vapour pressure deficit (kPa) from T and RH
+    ERA5_VPD_kPa  = 0.6108 * exp(17.27 * ERA5_Tair_C / (ERA5_Tair_C + 237.3)) *
+                    pmax(0, 1 - ERA5_RH_pct / 100),
+    # Temperature × soil moisture interaction (explicit for RF)
+    Tair_VSWC     = ERA5_Tair_C * ERA5_VSWC,
+    # Climatological prior: site × time-of-day mean — finest available resolution wins
+    climatological_CH4_mgC_30min = coalesce(
+      clim_site_month_hour, clim_site_season_hour,
+      clim_site_hour, clim_global_month_hour
+    ),
     observed_flux = is.finite(CH4_mgC_30min),
-    sin_hour = sin(2 * pi * hour_num / 24),
-    cos_hour = cos(2 * pi * hour_num / 24),
-    SITE_ID = factor(SITE_ID),
-    season = factor(season, levels = c("Winter", "Spring", "Summer", "Autumn")),
-    EcoType = factor(EcoType)
+    sin_hour  = sin(2 * pi * hour_num / 24),
+    cos_hour  = cos(2 * pi * hour_num / 24),
+    SITE_ID   = factor(SITE_ID),
+    season    = factor(season, levels = c("Winter", "Spring", "Summer", "Autumn")),
+    EcoType   = factor(EcoType),
+    month     = as.integer(month)
   )
 
 training_data <- gapfill_data %>%
@@ -368,6 +499,7 @@ training_data <- gapfill_data %>%
     is.finite(ERA5_VSWC),
     is.finite(hour_num),
     is.finite(doy),
+    is.finite(climatological_CH4_mgC_30min),
     !is.na(season),
     !is.na(EcoType)
   ) %>%
@@ -380,52 +512,149 @@ if (nrow(training_data) < 500) {
 site_training_counts <- training_data %>%
   count(SITE_ID, name = "n_training_obs")
 
-era5_gapfill_model <- mgcv::bam(
-  CH4_mgC_30min ~
-    s(hour_num, bs = "cc", k = 12) +
-    s(doy, bs = "cc", k = 20) +
-    s(ERA5_Tair_C, k = 10) +
-    s(ERA5_VSWC, k = 10) +
-    ti(ERA5_Tair_C, ERA5_VSWC, k = c(5, 5)) +
-    season +
-    EcoType +
-    s(SITE_ID, bs = "re"),
-  data = training_data,
-  family = gaussian(),
-  method = "fREML",
-  discrete = FALSE,
-  knots = list(hour_num = c(0, 24), doy = c(0.5, 366.5))
+# ── Gap-fill models ───────────────────────────────────────────────────────────
+#
+# Two models are trained:
+#   rf_site  : RF with SITE_ID as a predictor (site-level offsets).
+#              Used for sites with >= min_training_obs_per_site observations.
+#   rf_pop   : RF without SITE_ID (population-level, used for all gap periods).
+# OOB predictions used for ALL evaluation (no data leakage).
+
+rf_predictors_pop <- c(
+  "ERA5_Tair_C", "ERA5_Tsoil_C", "ERA5_VSWC", "ERA5_VSWC_deep",
+  "ERA5_precip_mm", "ERA5_SW_Wm2", "ERA5_VPD_kPa",
+  "tair_roll7", "precip_roll7", "Tair_VSWC",
+  "climatological_CH4_mgC_30min",
+  "sin_hour", "cos_hour", "doy", "month", "season", "EcoType"
+)
+rf_predictors_site <- c(rf_predictors_pop, "SITE_ID")
+
+training_rf <- training_data %>%
+  mutate(
+    SITE_ID = factor(as.character(SITE_ID)),
+    season  = factor(season, levels = c("Winter", "Spring", "Summer", "Autumn")),
+    EcoType = factor(EcoType)
+  )
+
+# ── mtry tuning (population model) ───────────────────────────────────────────
+message("Tuning mtry for population RF (100-tree sweep)...")
+mtry_candidates <- unique(c(4L, 6L, 9L, floor(length(rf_predictors_pop) / 2L)))
+mtry_oob <- vapply(mtry_candidates, function(m) {
+  rf_tmp <- ranger(
+    formula = CH4_mgC_30min ~ .,
+    data    = training_rf[, c("CH4_mgC_30min", rf_predictors_pop)],
+    num.trees = 100L, mtry = m, min.node.size = 5,
+    sample.fraction = 0.7, seed = 42
+  )
+  rf_tmp$r.squared
+}, numeric(1))
+best_mtry_pop  <- mtry_candidates[which.max(mtry_oob)]
+best_mtry_site <- min(best_mtry_pop + 1L, length(rf_predictors_site))
+message(sprintf("mtry sweep: %s | best pop mtry = %d (OOB R² = %.4f)",
+                paste(mtry_candidates, round(mtry_oob, 4), sep = "→", collapse = "; "),
+                best_mtry_pop, max(mtry_oob)))
+
+# ── RF site model ─────────────────────────────────────────────────────────────
+message("Fitting site-level RF (", nrow(training_rf), " obs, mtry = ", best_mtry_site, ")...")
+set.seed(42)
+era5_gapfill_rf_site <- ranger(
+  formula         = CH4_mgC_30min ~ .,
+  data            = training_rf[, c("CH4_mgC_30min", rf_predictors_site)],
+  num.trees       = 500,
+  mtry            = best_mtry_site,
+  min.node.size   = 5,
+  sample.fraction = 0.7,
+  importance      = "permutation",
+  seed            = 42
+)
+
+# ── RF population model ───────────────────────────────────────────────────────
+message("Fitting population RF (mtry = ", best_mtry_pop, ")...")
+set.seed(42)
+era5_gapfill_rf_pop <- ranger(
+  formula         = CH4_mgC_30min ~ .,
+  data            = training_rf[, c("CH4_mgC_30min", rf_predictors_pop)],
+  num.trees       = 500,
+  mtry            = best_mtry_pop,
+  min.node.size   = 5,
+  sample.fraction = 0.7,
+  importance      = "permutation",
+  seed            = 42
 )
 
 capture.output(
   {
-    cat("NEON ERA5-driven half-hourly total-flux gapfill model\n")
-    cat("Training observations:", nrow(training_data), "\n")
+    cat("NEON ERA5-driven half-hourly total-flux gapfill — Random Forest\n")
+    cat("Training observations:", nrow(training_rf), "\n")
     cat("ERA5 hourly file:", era5_hourly_file, "\n")
     cat("ERA5 half-hour file:", era5_halfhour_file, "\n\n")
-    print(summary(era5_gapfill_model))
+
+    cat("── Site-level RF (with SITE_ID, mtry =", best_mtry_site, ") ──\n")
+    cat("OOB R²:  ", round(era5_gapfill_rf_site$r.squared, 4), "\n")
+    cat("OOB MSE: ", round(era5_gapfill_rf_site$prediction.error, 6), "\n\n")
+
+    cat("── Population RF (no SITE_ID, mtry =", best_mtry_pop, ") ──\n")
+    cat("OOB R²:  ", round(era5_gapfill_rf_pop$r.squared, 4), "\n")
+    cat("OOB MSE: ", round(era5_gapfill_rf_pop$prediction.error, 6), "\n\n")
+
+    cat("── Variable importance (site-level RF) ──\n")
+    imp <- sort(era5_gapfill_rf_site$variable.importance, decreasing = TRUE)
+    print(round(imp, 6))
   },
   file = "OUTPUT/NEON_ERA5_halfhour_gapfill_model_summary.txt"
 )
 
-training_fit <- training_data %>%
+# ── OOB fit metrics (honest — no data leakage) ───────────────────────────────
+
+training_fit <- training_rf %>%
   mutate(
-    fitted_CH4_mgC_30min = as.numeric(predict(era5_gapfill_model, type = "response")),
-    residual_CH4_mgC_30min = CH4_mgC_30min - fitted_CH4_mgC_30min
+    oob_pred_site          = as.numeric(era5_gapfill_rf_site$predictions),
+    oob_pred_pop           = as.numeric(era5_gapfill_rf_pop$predictions),
+    residual_site          = CH4_mgC_30min - oob_pred_site,
+    residual_pop           = CH4_mgC_30min - oob_pred_pop,
+    # convenience aliases for downstream code
+    fitted_CH4_mgC_30min   = oob_pred_site,
+    residual_CH4_mgC_30min = residual_site
   )
 
 fit_metrics <- training_fit %>%
   summarise(
-    n_training = dplyr::n(),
-    rmse_mgC_m2_30min = sqrt(mean(residual_CH4_mgC_30min^2, na.rm = TRUE)),
-    mae_mgC_m2_30min = mean(abs(residual_CH4_mgC_30min), na.rm = TRUE),
-    bias_mgC_m2_30min = mean(residual_CH4_mgC_30min, na.rm = TRUE),
-    observed_sd_mgC_m2_30min = sd(CH4_mgC_30min, na.rm = TRUE),
-    fitted_sd_mgC_m2_30min = sd(fitted_CH4_mgC_30min, na.rm = TRUE),
-    correlation_observed_fitted = suppressWarnings(cor(CH4_mgC_30min, fitted_CH4_mgC_30min, use = "complete.obs"))
+    n_training               = dplyr::n(),
+    # Site RF (OOB)
+    rmse_site_mgC_m2_30min  = sqrt(mean(residual_site^2,  na.rm = TRUE)),
+    mae_site_mgC_m2_30min   = mean(abs(residual_site),    na.rm = TRUE),
+    bias_site_mgC_m2_30min  = mean(residual_site,         na.rm = TRUE),
+    r_site                  = suppressWarnings(cor(CH4_mgC_30min, oob_pred_site, use = "complete.obs")),
+    sign_accuracy_site_30min = mean(sign(CH4_mgC_30min) == sign(oob_pred_site), na.rm = TRUE),
+    oob_r2_site             = era5_gapfill_rf_site$r.squared,
+    # Population RF (OOB)
+    rmse_pop_mgC_m2_30min   = sqrt(mean(residual_pop^2,   na.rm = TRUE)),
+    mae_pop_mgC_m2_30min    = mean(abs(residual_pop),     na.rm = TRUE),
+    bias_pop_mgC_m2_30min   = mean(residual_pop,          na.rm = TRUE),
+    r_pop                   = suppressWarnings(cor(CH4_mgC_30min, oob_pred_pop, use = "complete.obs")),
+    sign_accuracy_pop_30min = mean(sign(CH4_mgC_30min) == sign(oob_pred_pop),  na.rm = TRUE),
+    oob_r2_pop              = era5_gapfill_rf_pop$r.squared,
+    observed_sd_mgC_m2_30min = sd(CH4_mgC_30min, na.rm = TRUE)
   )
 
+# Legacy aliases for downstream summary text and flow.plots.R
+fit_metrics$rmse_mgC_m2_30min          <- fit_metrics$rmse_site_mgC_m2_30min
+fit_metrics$mae_mgC_m2_30min           <- fit_metrics$mae_site_mgC_m2_30min
+fit_metrics$bias_mgC_m2_30min          <- fit_metrics$bias_site_mgC_m2_30min
+fit_metrics$correlation_observed_fitted <- fit_metrics$r_site
+
 write.csv(fit_metrics, "OUTPUT/NEON_ERA5_halfhour_gapfill_fit_metrics.csv", row.names = FALSE)
+
+# Per-site OOB metrics (used in sign sensitivity)
+fit_metrics_site <- training_fit %>%
+  group_by(SITE_ID) %>%
+  summarise(
+    n_obs                   = dplyr::n(),
+    oob_rmse_site           = sqrt(mean(residual_site^2,  na.rm = TRUE)),
+    oob_r_site              = suppressWarnings(cor(CH4_mgC_30min, oob_pred_site, use = "complete.obs")),
+    sign_accuracy_30min     = mean(sign(CH4_mgC_30min) == sign(oob_pred_site), na.rm = TRUE),
+    .groups = "drop"
+  )
 
 set.seed(20260519)
 fit_plot_data <- training_fit %>%
@@ -434,150 +663,351 @@ fit_plot_data <- training_fit %>%
 write.csv(fit_plot_data, "OUTPUT/NEON_ERA5_halfhour_gapfill_fit_plot_data.csv", row.names = FALSE)
 
 
-reference_values <- training_data %>%
+# ── Partial dependence (marginal effects) for the population RF ───────────────
+# Each driver is varied across its observed range while all other predictors are
+# held at reference values. The population RF (no SITE_ID) is used so predictions
+# reflect the marginal effect without site-level confounding.
+
+reference_values <- training_rf %>%
   summarise(
-    hour_num = 12,
-    doy = 182,
-    ERA5_Tair_C = median(ERA5_Tair_C, na.rm = TRUE),
-    ERA5_VSWC = median(ERA5_VSWC, na.rm = TRUE),
-    season = names(sort(table(season), decreasing = TRUE))[1],
-    EcoType = names(sort(table(EcoType), decreasing = TRUE))[1],
-    SITE_ID = levels(SITE_ID)[1]
+    hour_num       = 12,
+    doy            = 182,
+    month          = 7L,
+    ERA5_Tair_C    = median(ERA5_Tair_C,    na.rm = TRUE),
+    ERA5_VSWC      = median(ERA5_VSWC,      na.rm = TRUE),
+    ERA5_Tsoil_C   = median(ERA5_Tsoil_C,   na.rm = TRUE),
+    ERA5_VSWC_deep = median(ERA5_VSWC_deep, na.rm = TRUE),
+    ERA5_precip_mm = median(ERA5_precip_mm, na.rm = TRUE),
+    ERA5_SW_Wm2    = median(ERA5_SW_Wm2,    na.rm = TRUE),
+    ERA5_VPD_kPa   = median(ERA5_VPD_kPa,   na.rm = TRUE),
+    tair_roll7     = median(tair_roll7,      na.rm = TRUE),
+    precip_roll7   = median(precip_roll7,    na.rm = TRUE),
+    Tair_VSWC      = median(Tair_VSWC,       na.rm = TRUE),
+    climatological_CH4_mgC_30min = median(climatological_CH4_mgC_30min, na.rm = TRUE),
+    season         = names(sort(table(season),  decreasing = TRUE))[1],
+    EcoType        = names(sort(table(EcoType), decreasing = TRUE))[1]
   )
 
 make_effect_grid <- function(driver, values) {
   tibble(
-    driver = driver,
-    driver_value = values,
-    hour_num = reference_values$hour_num,
-    doy = reference_values$doy,
-    ERA5_Tair_C = reference_values$ERA5_Tair_C,
-    ERA5_VSWC = reference_values$ERA5_VSWC,
-    season = reference_values$season,
-    EcoType = reference_values$EcoType,
-    SITE_ID = reference_values$SITE_ID
+    driver         = driver,
+    driver_value   = values,
+    hour_num       = reference_values$hour_num,
+    doy            = reference_values$doy,
+    month          = reference_values$month,
+    ERA5_Tair_C    = reference_values$ERA5_Tair_C,
+    ERA5_VSWC      = reference_values$ERA5_VSWC,
+    ERA5_Tsoil_C   = reference_values$ERA5_Tsoil_C,
+    ERA5_VSWC_deep = reference_values$ERA5_VSWC_deep,
+    ERA5_precip_mm = reference_values$ERA5_precip_mm,
+    ERA5_SW_Wm2    = reference_values$ERA5_SW_Wm2,
+    ERA5_VPD_kPa   = reference_values$ERA5_VPD_kPa,
+    tair_roll7     = reference_values$tair_roll7,
+    precip_roll7   = reference_values$precip_roll7,
+    Tair_VSWC      = reference_values$Tair_VSWC,
+    climatological_CH4_mgC_30min = reference_values$climatological_CH4_mgC_30min,
+    season         = reference_values$season,
+    EcoType        = reference_values$EcoType
   ) %>%
     mutate(
-      hour_num = if_else(driver == "hour_num", driver_value, hour_num),
-      doy = if_else(driver == "doy", driver_value, doy),
-      ERA5_Tair_C = if_else(driver == "ERA5_Tair_C", driver_value, ERA5_Tair_C),
-      ERA5_VSWC = if_else(driver == "ERA5_VSWC", driver_value, ERA5_VSWC),
-      season = factor(season, levels = levels(training_data$season)),
-      EcoType = factor(EcoType, levels = levels(training_data$EcoType)),
-      SITE_ID = factor(SITE_ID, levels = levels(training_data$SITE_ID))
+      sin_hour       = sin(2 * pi * hour_num / 24),
+      cos_hour       = cos(2 * pi * hour_num / 24),
+      hour_num       = if_else(driver == "hour_num",       driver_value, hour_num),
+      doy            = if_else(driver == "doy",            driver_value, doy),
+      ERA5_Tair_C    = if_else(driver == "ERA5_Tair_C",    driver_value, ERA5_Tair_C),
+      ERA5_VSWC      = if_else(driver == "ERA5_VSWC",      driver_value, ERA5_VSWC),
+      ERA5_Tsoil_C   = if_else(driver == "ERA5_Tsoil_C",   driver_value, ERA5_Tsoil_C),
+      ERA5_VSWC_deep = if_else(driver == "ERA5_VSWC_deep", driver_value, ERA5_VSWC_deep),
+      ERA5_precip_mm = if_else(driver == "ERA5_precip_mm", driver_value, ERA5_precip_mm),
+      ERA5_SW_Wm2    = if_else(driver == "ERA5_SW_Wm2",    driver_value, ERA5_SW_Wm2),
+      ERA5_VPD_kPa   = if_else(driver == "ERA5_VPD_kPa",   driver_value, ERA5_VPD_kPa),
+      tair_roll7     = if_else(driver == "tair_roll7",     driver_value, tair_roll7),
+      precip_roll7   = if_else(driver == "precip_roll7",   driver_value, precip_roll7),
+      climatological_CH4_mgC_30min = if_else(driver == "climatological_CH4_mgC_30min",
+                                             driver_value, climatological_CH4_mgC_30min),
+      Tair_VSWC      = ERA5_Tair_C * ERA5_VSWC,   # keep consistent with training
+      sin_hour       = sin(2 * pi * hour_num / 24),
+      cos_hour       = cos(2 * pi * hour_num / 24),
+      season         = factor(season,  levels = levels(training_rf$season)),
+      EcoType        = factor(EcoType, levels = levels(training_rf$EcoType))
     )
 }
 
+make_range <- function(col, lo = 0.02, hi = 0.98, n = 100)
+  seq(quantile(training_rf[[col]], lo, na.rm = TRUE),
+      quantile(training_rf[[col]], hi, na.rm = TRUE),
+      length.out = n)
+
 effect_grid <- bind_rows(
-  make_effect_grid("hour_num", seq(0, 23.5, by = 0.5)),
-  make_effect_grid("doy", seq(1, 366, length.out = 160)),
-  make_effect_grid(
-    "ERA5_Tair_C",
-    seq(quantile(training_data$ERA5_Tair_C, 0.02, na.rm = TRUE),
-        quantile(training_data$ERA5_Tair_C, 0.98, na.rm = TRUE),
-        length.out = 160)
-  ),
-  make_effect_grid(
-    "ERA5_VSWC",
-    seq(quantile(training_data$ERA5_VSWC, 0.02, na.rm = TRUE),
-        quantile(training_data$ERA5_VSWC, 0.98, na.rm = TRUE),
-        length.out = 160)
-  )
+  make_effect_grid("hour_num",       seq(0, 23.5, by = 0.5)),
+  make_effect_grid("doy",            seq(1, 366, length.out = 100)),
+  make_effect_grid("ERA5_Tair_C",    make_range("ERA5_Tair_C")),
+  make_effect_grid("ERA5_VSWC",      make_range("ERA5_VSWC")),
+  make_effect_grid("ERA5_Tsoil_C",   make_range("ERA5_Tsoil_C")),
+  make_effect_grid("ERA5_VPD_kPa",   make_range("ERA5_VPD_kPa")),
+  make_effect_grid("ERA5_SW_Wm2",    make_range("ERA5_SW_Wm2")),
+  make_effect_grid("ERA5_precip_mm", make_range("ERA5_precip_mm")),
+  make_effect_grid("tair_roll7",     make_range("tair_roll7")),
+  make_effect_grid("precip_roll7",   make_range("precip_roll7")),
+  make_effect_grid("climatological_CH4_mgC_30min", make_range("climatological_CH4_mgC_30min"))
 )
 
-effect_pred <- predict(
-  era5_gapfill_model,
-  newdata = effect_grid,
-  type = "response",
-  se.fit = TRUE,
-  exclude = "s(SITE_ID)"
+effect_preds <- predict(era5_gapfill_rf_pop, data = effect_grid)$predictions
+
+driver_labels <- c(
+  hour_num       = "Hour of day",
+  doy            = "Day of year",
+  ERA5_Tair_C    = "ERA5 air temperature (°C)",
+  ERA5_VSWC      = "ERA5 soil moisture 0–7 cm (m³/m³)",
+  ERA5_Tsoil_C   = "ERA5 soil temperature 0–7 cm (°C)",
+  ERA5_VPD_kPa   = "ERA5 vapour pressure deficit (kPa)",
+  ERA5_SW_Wm2    = "ERA5 shortwave radiation (W m⁻²)",
+  ERA5_precip_mm = "ERA5 precipitation (mm hr⁻¹)",
+  tair_roll7     = "7-day rolling mean air temp (°C)",
+  precip_roll7   = "7-day cumulative precip (mm)"
 )
 
 effect_grid <- effect_grid %>%
   mutate(
-    pred_CH4_mgC_30min = as.numeric(effect_pred$fit),
-    se_CH4_mgC_30min = as.numeric(effect_pred$se.fit),
-    lower_CH4_mgC_30min = pred_CH4_mgC_30min - 1.64 * se_CH4_mgC_30min,
-    upper_CH4_mgC_30min = pred_CH4_mgC_30min + 1.64 * se_CH4_mgC_30min,
-    driver_label = recode(
-      driver,
-      hour_num = "Hour of day",
-      doy = "Day of year",
-      ERA5_Tair_C = "ERA5 air temperature (C)",
-      ERA5_VSWC = "ERA5 soil moisture (0-7 cm)"
-    )
+    pred_CH4_mgC_30min  = as.numeric(effect_preds),
+    se_CH4_mgC_30min    = NA_real_,
+    lower_CH4_mgC_30min = NA_real_,
+    upper_CH4_mgC_30min = NA_real_,
+    driver_label = driver_labels[driver]
   )
 
 write.csv(effect_grid, "OUTPUT/NEON_ERA5_halfhour_gapfill_model_effects.csv", row.names = FALSE)
 
 
 
-model_site_levels <- levels(training_data$SITE_ID)
+# ── Prediction: apply RF models to full site-year grid ───────────────────────
+# Sites with >= min_training_obs_per_site use the site-level RF (SITE_ID known).
+# Sites with too few training obs use the population RF (no SITE_ID).
+
+model_site_levels <- levels(training_rf$SITE_ID)
 
 prediction_data <- gapfill_data %>%
   mutate(SITE_ID_original = as.character(SITE_ID)) %>%
   left_join(site_training_counts %>% mutate(SITE_ID = as.character(SITE_ID)), by = "SITE_ID") %>%
   mutate(
-    n_training_obs = replace_na(n_training_obs, 0L),
-    use_site_effect = SITE_ID_original %in% model_site_levels & n_training_obs >= min_training_obs_per_site,
-    SITE_ID = factor(
+    n_training_obs  = replace_na(n_training_obs, 0L),
+    use_site_model  = SITE_ID_original %in% model_site_levels &
+                      n_training_obs >= min_training_obs_per_site,
+    # Ensure SITE_ID factor has the same levels as training for the site RF
+    SITE_ID_rf = factor(
       if_else(SITE_ID_original %in% model_site_levels, SITE_ID_original, model_site_levels[1]),
       levels = model_site_levels
-    )
+    ),
+    season  = factor(season,  levels = c("Winter", "Spring", "Summer", "Autumn")),
+    EcoType = factor(EcoType, levels = levels(training_rf$EcoType))
   )
 
-prediction_population <- predict(
-  era5_gapfill_model,
-  newdata = prediction_data,
-  type = "response",
-  exclude = "s(SITE_ID)"
-)
+# Population predictions (no SITE_ID) — population RF
+pred_pop_all <- predict(
+  era5_gapfill_rf_pop,
+  data = prediction_data %>% dplyr::select(all_of(rf_predictors_pop))
+)$predictions
 
-prediction_site <- rep(NA_real_, nrow(prediction_data))
-site_effect_rows <- which(prediction_data$use_site_effect)
+# Site predictions only for rows where the site was adequately trained
+pred_site_all <- rep(NA_real_, nrow(prediction_data))
+site_rows <- which(prediction_data$use_site_model)
 
-if (length(site_effect_rows) > 0) {
-  prediction_site[site_effect_rows] <- predict(
-    era5_gapfill_model,
-    newdata = prediction_data[site_effect_rows, , drop = FALSE],
-    type = "response"
-  )
+if (length(site_rows) > 0) {
+  pred_site_all[site_rows] <- predict(
+    era5_gapfill_rf_site,
+    data = prediction_data[site_rows, ] %>%
+      mutate(SITE_ID = SITE_ID_rf) %>%
+      dplyr::select(all_of(rf_predictors_site))
+  )$predictions
 }
 
 era5_gapfilled_30min <- prediction_data %>%
   mutate(
-    pred_CH4_mgC_30min_population = as.numeric(prediction_population),
-    pred_CH4_mgC_30min_site = as.numeric(prediction_site),
-    pred_CH4_mgC_30min = if_else(use_site_effect, pred_CH4_mgC_30min_site, pred_CH4_mgC_30min_population),
+    pred_CH4_mgC_30min_population = as.numeric(pred_pop_all),
+    pred_CH4_mgC_30min_site       = as.numeric(pred_site_all),
+    pred_CH4_mgC_30min = if_else(
+      use_site_model,
+      pred_CH4_mgC_30min_site,
+      pred_CH4_mgC_30min_population
+    ),
     gapfilled_CH4_mgC_30min = if_else(observed_flux, CH4_mgC_30min, pred_CH4_mgC_30min),
     prediction_type = case_when(
-      observed_flux ~ "observed",
-      use_site_effect ~ "site_model_gapfill",
-      TRUE ~ "population_model_gapfill"
+      observed_flux   ~ "observed",
+      use_site_model  ~ "site_rf_gapfill",
+      TRUE            ~ "population_rf_gapfill"
     ),
     SITE_ID = SITE_ID_original
   ) %>%
   dplyr::select(
     SITE_ID, Year, time.rounded, Date, month, doy, hour_num, season, EcoType,
-    ERA5_Tair_C, ERA5_VSWC, CH4_mgC_30min, observed_flux,
+    ERA5_Tair_C, ERA5_Tsoil_C, ERA5_VSWC, ERA5_VSWC_deep,
+    ERA5_precip_mm, ERA5_SW_Wm2, ERA5_VPD_kPa,
+    tair_roll7, precip_roll7, Tair_VSWC, climatological_CH4_mgC_30min,
+    CH4_mgC_30min, observed_flux,
     pred_CH4_mgC_30min, gapfilled_CH4_mgC_30min, prediction_type, n_training_obs
   )
 
 data.table::fwrite(era5_gapfilled_30min, "OUTPUT/NEON_ERA5_gapfilled_30min.csv.gz")
 
-era5_annual_budget <- era5_gapfilled_30min %>%
-  reframe(
-    .by = c(SITE_ID, Year),
-    n_30min = dplyr::n(),
-    n_observed = sum(observed_flux, na.rm = TRUE),
-    observed_coverage = mean(observed_flux, na.rm = TRUE),
-    n_training_obs = max(n_training_obs, na.rm = TRUE),
-    annual_budget_gC_m2_yr = sum(gapfilled_CH4_mgC_30min, na.rm = TRUE) / 1000,
-    model_only_annual_budget_gC_m2_yr = sum(pred_CH4_mgC_30min, na.rm = TRUE) / 1000,
-    observed_partial_gC_m2 = sum(CH4_mgC_30min[observed_flux], na.rm = TRUE) / 1000,
-    gapfilled_partial_gC_m2 = sum(gapfilled_CH4_mgC_30min[!observed_flux], na.rm = TRUE) / 1000
+# ── Sign sensitivity analysis ─────────────────────────────────────────────────
+#
+# Three layers of sign uncertainty quantification:
+#
+#  Layer 1 — 30-min OOB sign accuracy
+#    For each observed half-hour, does the OOB prediction have the correct sign?
+#    Computed per site so we know which sites the model is most uncertain about.
+#
+#  Layer 2 — Annual budget sign from OOB predictions
+#    Treating all observations as if they were gap-filled (using OOB predictions),
+#    does the annual budget have the same sign as the observed annual budget?
+#    Sign accuracy at the annual scale is the relevant metric for the paper.
+#
+#  Layer 3 — Bootstrap sign probability for actual gap-filled budgets
+#    For each site-year, the actual annual budget mixes observed (fixed) and
+#    gap-filled (uncertain) observations.  The gap-fill uncertainty is
+#    approximated as N(0, oob_rmse × sqrt(n_gapfilled)) per site (conservative:
+#    assumes independent errors across time steps).  Drawing B samples from this
+#    distribution gives a distribution of plausible annual budgets, and
+#    P(source) = fraction of draws that are positive.  Sites with P(source)
+#    near 0.5 have sign-uncertain budgets.
+
+# Layer 1: OOB sign accuracy (already in fit_metrics_site)
+write.csv(fit_metrics_site, "OUTPUT/NEON_ERA5_rf_oob_sign_accuracy_by_site.csv", row.names = FALSE)
+
+# Layer 2: Annual budget sign from OOB predictions vs. observed
+oob_annual_budget <- training_rf %>%
+  mutate(
+    oob_pred_site = as.numeric(era5_gapfill_rf_site$predictions),
+    Year = as.integer(format(as.Date(substr(as.character(SITE_ID), 1, 4), "%Y"), "%Y"))
+  )
+
+# Re-extract Year from training_data (which has it)
+oob_annual_budget <- training_data %>%
+  mutate(
+    oob_pred_site = as.numeric(era5_gapfill_rf_site$predictions),
+    oob_pred_pop  = as.numeric(era5_gapfill_rf_pop$predictions)
   ) %>%
-  arrange(SITE_ID, Year)
+  group_by(SITE_ID, Year) %>%
+  summarise(
+    n_obs                      = dplyr::n(),
+    annual_obs_gC_m2_yr        = sum(CH4_mgC_30min,  na.rm = TRUE) / 1000,
+    annual_oob_site_gC_m2_yr   = sum(oob_pred_site,  na.rm = TRUE) / 1000,
+    annual_oob_pop_gC_m2_yr    = sum(oob_pred_pop,   na.rm = TRUE) / 1000,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    sign_agree_site = sign(annual_obs_gC_m2_yr) == sign(annual_oob_site_gC_m2_yr),
+    sign_agree_pop  = sign(annual_obs_gC_m2_yr) == sign(annual_oob_pop_gC_m2_yr)
+  )
+
+oob_sign_summary <- oob_annual_budget %>%
+  summarise(
+    n_site_years         = dplyr::n(),
+    sign_accuracy_site   = mean(sign_agree_site, na.rm = TRUE),
+    sign_accuracy_pop    = mean(sign_agree_pop,  na.rm = TRUE)
+  )
+
+write.csv(oob_annual_budget,  "OUTPUT/NEON_ERA5_rf_oob_annual_budget_sign.csv",    row.names = FALSE)
+write.csv(oob_sign_summary,   "OUTPUT/NEON_ERA5_rf_oob_sign_summary.csv",          row.names = FALSE)
+
+# Layer 3: Bootstrap P(source) for gap-filled annual budgets
+# Uses the per-site OOB RMSE as the per-observation uncertainty.
+# Gap-fill contribution uncertainty: SD = oob_rmse × sqrt(n_gapfilled)
+# (conservative: independent errors; actual uncertainty is smaller if errors are
+# correlated in time, as is typical for gap-filling.)
+
+B_sign <- 500L   # bootstrap draws per site-year
+
+set.seed(42)
+era5_annual_budget_pre <- era5_gapfilled_30min %>%
+  group_by(SITE_ID, Year) %>%
+  summarise(
+    n_30min                         = dplyr::n(),
+    n_observed                      = sum(observed_flux,    na.rm = TRUE),
+    n_gapfilled                     = sum(!observed_flux,   na.rm = TRUE),
+    observed_coverage               = mean(observed_flux,   na.rm = TRUE),
+    n_training_obs                  = max(n_training_obs,   na.rm = TRUE),
+    annual_budget_gC_m2_yr          = sum(gapfilled_CH4_mgC_30min, na.rm = TRUE) / 1000,
+    model_only_annual_budget_gC_m2_yr = sum(pred_CH4_mgC_30min,    na.rm = TRUE) / 1000,
+    observed_partial_gC_m2          = sum(CH4_mgC_30min[observed_flux],  na.rm = TRUE) / 1000,
+    gapfilled_partial_gC_m2         = sum(gapfilled_CH4_mgC_30min[!observed_flux], na.rm = TRUE) / 1000,
+    .groups = "drop"
+  )
+
+sign_sensitivity <- era5_annual_budget_pre %>%
+  left_join(
+    fit_metrics_site %>% dplyr::select(SITE_ID = SITE_ID, oob_rmse_site),
+    by = "SITE_ID"
+  ) %>%
+  mutate(
+    # Fall back to global median RMSE for sites without OOB metrics
+    oob_rmse_site = coalesce(
+      oob_rmse_site,
+      median(fit_metrics_site$oob_rmse_site, na.rm = TRUE)
+    ),
+    # SD of gap-fill contribution (assuming independent errors across time steps)
+    gap_fill_sd_gC_m2_yr = oob_rmse_site * sqrt(pmax(n_gapfilled, 0L)) / 1000,
+    # Sign margin: how far the budget is from zero relative to gap-fill uncertainty
+    sign_margin_sd = if_else(
+      gap_fill_sd_gC_m2_yr > 0,
+      annual_budget_gC_m2_yr / gap_fill_sd_gC_m2_yr,
+      NA_real_
+    )
+  ) %>%
+  rowwise() %>%
+  mutate(
+    # Bootstrap: draw B samples of the gap-fill contribution from N(mean, SD)
+    boot_budgets  = list(
+      observed_partial_gC_m2 +
+        rnorm(B_sign, mean = gapfilled_partial_gC_m2, sd = gap_fill_sd_gC_m2_yr)
+    ),
+    p_source      = mean(unlist(boot_budgets) > 0),
+    budget_ci_lwr = quantile(unlist(boot_budgets), 0.025),
+    budget_ci_upr = quantile(unlist(boot_budgets), 0.975),
+    # Stable = 95% CI does not straddle zero
+    sign_stable   = (budget_ci_lwr > 0) | (budget_ci_upr < 0),
+    sign_category = case_when(
+      p_source >= 0.95 ~ "Stable source",
+      p_source <= 0.05 ~ "Stable sink",
+      p_source >  0.50 ~ "Probable source (uncertain)",
+      TRUE             ~ "Probable sink (uncertain)"
+    )
+  ) %>%
+  ungroup() %>%
+  dplyr::select(-boot_budgets)
+
+write.csv(sign_sensitivity, "OUTPUT/NEON_ERA5_rf_sign_sensitivity.csv", row.names = FALSE)
+
+# Site-level sign sensitivity summary (aggregate across years)
+sign_sensitivity_site <- sign_sensitivity %>%
+  group_by(SITE_ID) %>%
+  summarise(
+    n_years              = dplyr::n(),
+    mean_annual_budget   = mean(annual_budget_gC_m2_yr,  na.rm = TRUE),
+    mean_p_source        = mean(p_source,                 na.rm = TRUE),
+    frac_sign_stable     = mean(sign_stable,              na.rm = TRUE),
+    frac_stable_source   = mean(sign_category == "Stable source",               na.rm = TRUE),
+    frac_stable_sink     = mean(sign_category == "Stable sink",                 na.rm = TRUE),
+    frac_uncertain       = mean(grepl("uncertain", sign_category),               na.rm = TRUE),
+    sign_sensitivity_class = case_when(
+      mean_p_source >= 0.95 ~ "Stable source",
+      mean_p_source <= 0.05 ~ "Stable sink",
+      mean_p_source >  0.50 ~ "Probable source (sign-uncertain)",
+      TRUE                  ~ "Probable sink (sign-uncertain)"
+    ),
+    .groups = "drop"
+  )
+
+write.csv(sign_sensitivity_site, "OUTPUT/NEON_ERA5_rf_sign_sensitivity_by_site.csv", row.names = FALSE)
+
+message(sprintf(
+  "Sign sensitivity: %d/%d site-years have stable sign; %d sites sign-uncertain at site level.",
+  sum(sign_sensitivity$sign_stable, na.rm = TRUE),
+  nrow(sign_sensitivity),
+  sum(grepl("uncertain", sign_sensitivity_site$sign_sensitivity_class))
+))
+
+era5_annual_budget <- era5_annual_budget_pre %>% arrange(SITE_ID, Year)
 
 era5_mean_annual_budget <- era5_annual_budget %>%
   reframe(
@@ -977,22 +1407,35 @@ writeLines(
     "",
     "## ERA5 Source",
     "- Hourly ERA5 point covariates were requested from the Open-Meteo Archive API for each NEON tower coordinate.",
-    "- Variables: 2 m air temperature and 0-7 cm soil volumetric water content.",
-    "- Hourly values were linearly interpolated to 30-minute timestamps.",
+    "- Variables: 2 m air temperature, 2 m relative humidity, 0-7 cm soil temperature, 0-7 cm and 7-28 cm soil moisture, precipitation (mm/hr), shortwave radiation.",
+    "- Hourly values were linearly interpolated to 30-minute timestamps (precipitation: floor-hour value).",
     "",
     "## Model",
-    paste0("- Training observations with ERA5 covariates: ", nrow(training_data), "."),
-    paste0("- Model fit RMSE: ", signif(fit_metrics$rmse_mgC_m2_30min, 3),
-           " mg C m-2 30 min-1; observed-fitted correlation: ",
-           signif(fit_metrics$correlation_observed_fitted, 3), "."),
+    paste0("- Training observations: ", nrow(training_rf), "."),
+    paste0("- Site-level RF OOB R²: ", round(era5_gapfill_rf_site$r.squared, 3),
+           " (mtry = ", best_mtry_site, "); OOB RMSE: ",
+           signif(fit_metrics$rmse_site_mgC_m2_30min, 3), " mg C m-2 30 min-1."),
+    paste0("- Population RF OOB R²: ", round(era5_gapfill_rf_pop$r.squared, 3),
+           " (mtry = ", best_mtry_pop, "); OOB RMSE: ",
+           signif(fit_metrics$rmse_pop_mgC_m2_30min, 3), " mg C m-2 30 min-1."),
+    paste0("- 30-min OOB sign accuracy (site RF): ",
+           round(100 * fit_metrics$sign_accuracy_site_30min, 1), "%."),
+    paste0("- OOB annual budget sign accuracy (site RF): ",
+           round(100 * oob_sign_summary$sign_accuracy_site, 1), "% of site-years."),
+    paste0("- Sign-stable site-years (95% CI does not straddle zero): ",
+           sum(sign_sensitivity$sign_stable, na.rm = TRUE), " of ", nrow(sign_sensitivity), "."),
     "- Response: total CH4 flux in mg C m-2 30 min-1.",
-    "- Predictors: cyclic hour, cyclic day of year, ERA5 air temperature, ERA5 soil moisture, their tensor interaction, season, ecosystem type, and site random effect.",
-    "- Annual budgets retain observed half-hour fluxes where available and fill missing half-hours with ERA5-driven model predictions.",
+    paste0("- Predictors (", length(rf_predictors_pop), " population): ERA5 air/soil temperature, surface/deep soil moisture,",
+           " precipitation, shortwave radiation, VPD; 7-day rolling mean Tair and cumulative precip;",
+           " Tair×VSWC interaction; climatological site×time-of-day mean (cascade: month-hour → season-hour → hour → global);",
+           " cyclic hour (sin/cos), DOY, month, season, ecosystem type.",
+           " Site-level RF additionally includes SITE_ID."),
+    "- Annual budgets retain observed half-hour fluxes where available and fill missing half-hours with best-model predictions.",
     "",
-    "## Comparison To Model-Standardized 30-Minute Annual Budget",
+    "## Comparison To LUT (Balanced Site-Month-Hour) Annual Budget",
     paste0("- Sites compared: ", nrow(budget_comparison), "."),
     paste0("- Spearman correlation: ", signif(comparison_cor, 3), "."),
-    paste0("- Mean ERA5-minus-model-standardized difference: ", signif(comparison_bias, 3), " g C m-2 yr-1."),
+    paste0("- Mean ERA5-minus-LUT difference: ", signif(comparison_bias, 3), " g C m-2 yr-1."),
     paste0("- RMSE: ", signif(comparison_rmse, 3), " g C m-2 yr-1."),
     paste0("- Sign agreement: ", sum(budget_comparison$sign_agreement, na.rm = TRUE), " of ", nrow(budget_comparison), " sites."),
     "",
@@ -1025,6 +1468,11 @@ writeLines(
     "- `OUTPUT/NEON_ERA5_halfhour_gapfill_model_summary.txt`",
     "- `OUTPUT/NEON_ERA5_halfhour_gapfill_fit_metrics.csv`",
     "- `OUTPUT/NEON_ERA5_halfhour_gapfill_model_effects.csv`",
+    "- `OUTPUT/NEON_ERA5_rf_oob_sign_accuracy_by_site.csv`",
+    "- `OUTPUT/NEON_ERA5_rf_oob_annual_budget_sign.csv`",
+    "- `OUTPUT/NEON_ERA5_rf_oob_sign_summary.csv`",
+    "- `OUTPUT/NEON_ERA5_rf_sign_sensitivity.csv`",
+    "- `OUTPUT/NEON_ERA5_rf_sign_sensitivity_by_site.csv`",
     "- `FIGURES/NEON_ERA5_halfhour_gapfill_model_fit_summary.png`",
     "- `FIGURES/NEON_ERA5_vs_model_standardized_budget_scatter.png`",
     "- `FIGURES/NEON_ERA5_vs_model_standardized_budget_differences.png`",

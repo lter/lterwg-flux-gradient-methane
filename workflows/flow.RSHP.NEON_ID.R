@@ -22,8 +22,8 @@ RSHP.CO2 <- SITES_One2One %>%
 
 missing.CO2 <- setdiff(all.sites, RSHP.CO2$Site %>% unique) 
 
-RSHP.CO2.add <- SITES_One2One %>% 
-  filter( Site %in% missing.CO2, gas == "CO2", CCC >= Site.max.CCC ) %>% 
+RSHP.CO2.add <- SITES_One2One %>%
+  filter( Site %in% missing.CO2, gas == "CO2", CCC == Site.max.CCC ) %>%
   select( Site, dLevelsAminusB, Approach) %>% mutate( RSHP.CO2 = 1)
 
 
@@ -41,8 +41,8 @@ RSHP.H2O.add <- SITES_One2One %>%
 RSHP.CO2.all <- rbind( RSHP.CO2, RSHP.CO2.add)
 RSHP.H2O.all <- rbind( RSHP.H2O, RSHP.H2O.add)
 
-NEON_RSHP_EVAL <- RSHP.CO2.all %>% 
-  left_join( RSHP.H2O.all, by = c('Site', 'dLevelsAminusB', 'Approach')) 
+NEON_RSHP_EVAL <- RSHP.CO2.all %>%
+  full_join( RSHP.H2O.all, by = c('Site', 'dLevelsAminusB', 'Approach'))
 
 
 NEON_RSHP_EVAL <- NEON_RSHP_EVAL %>% mutate(RSHP.CO2 = replace_na(RSHP.CO2, 0) %>% as.factor,

@@ -723,8 +723,8 @@ if (era5_files_present) {
     geom_line(color = "grey10", linewidth = 1.0) +
     facet_wrap(~ driver_label, scales = "free_x", ncol = 2) +
     labs(
-      title    = "C. Population-level model effects",
-      subtitle = "Predictions hold other covariates at typical values; ribbons are +/- 90% model SE.",
+      title    = "C. Population-level RF effects",
+      subtitle = "Partial dependence: other covariates held at reference values; population RF (no SITE_ID).",
       x = NULL, y = "Predicted CH4 flux (mg C m-2 30 min-1)"
     ) +
     theme_neon(FIG_BASE) +
@@ -752,9 +752,11 @@ if (era5_files_present) {
     (plot_model_effects | plot_residual_distribution) +
     plot_layout(heights = c(1, 1.25), guides = "collect") +
     plot_annotation(
-      title    = "ERA5 Half-Hourly Gapfill GAM Fit Summary",
-      subtitle = paste0("Training rows = ", fit_metrics$n_training),
-      caption  = "Observed/fitted diagnostics include site random effect. Model-effect panels exclude site random effect."
+      title    = "ERA5 Half-Hourly Gapfill RF Fit Summary (OOB)",
+      subtitle = paste0("Training rows = ", fit_metrics$n_training,
+                        "; Site RF OOB R² = ", round(fit_metrics$oob_r2_site, 3),
+                        "; Pop RF OOB R² = ", round(fit_metrics$oob_r2_pop, 3)),
+      caption  = "Observed/fitted diagnostics use OOB predictions from the site RF (includes SITE_ID). Model-effect panels use population RF (no SITE_ID)."
     ) &
     theme(
       plot.title    = element_text(face = "bold", size = 15),
@@ -804,19 +806,19 @@ if (era5_files_present) {
     coord_cartesian(xlim = c(-axis_lim, axis_lim), ylim = c(-axis_lim, axis_lim)) +
     labs(
       title    = paste(strwrap(
-        "ERA5 Half-Hour Gapfilled vs Standardized Annual Budget",
+        "ERA5 Half-Hour Gapfilled vs LUT Annual Budget",
         width = 45), collapse = "\n"),
       subtitle = paste0("Spearman rho = ", signif(comparison_cor, 3),
                         "; RMSE = ", signif(comparison_rmse, 3), " g C m⁻² yr⁻¹",
                         "\nSign agrees: ",
                         sum(budget_comparison$sign_agree, na.rm = TRUE), " of ",
                         nrow(budget_comparison), " sites"),
-      x       = expression(paste("Standardized (g C ", m^-2, " yr"^-1, ")")),
+      x       = expression(paste("LUT balanced (g C ", m^-2, " yr"^-1, ")")),
       y       = expression(paste("ERA5 gapfilled (g C ", m^-2, " yr"^-1, ")")),
       color   = "State class",
       caption = paste(strwrap(
-        "Orange quadrants: methods disagree on sign. Bars: 95% simulation CI.",
-        width = 55), collapse = "\n")
+        "LUT = balanced site-month-hour lookup from NEON.30min.Gapfill.R. Orange quadrants: methods disagree on sign. Bars: 95% simulation CI.",
+        width = 65), collapse = "\n")
     ) +
     theme_neon(FIG_BASE) +
     theme(
@@ -828,7 +830,7 @@ if (era5_files_present) {
       panel.grid.minor = element_blank()
     )
 
-  ggsave("FIGURES/NEON_ERA5_vs_model_standardized_budget_scatter.png",
+  ggsave("FIGURES/NEON_ERA5_vs_lut_budget_scatter.png",
          plot_budget_comparison, width = FIG_W_FULL, height = FIG_H_MAP + 1, units = "in", dpi = 300)
 
   plot_budget_difference <- budget_comparison %>%
@@ -839,8 +841,9 @@ if (era5_files_present) {
     geom_col(width = 0.7, alpha = 0.9) +
     scale_fill_manual(values = behavior_colors, na.translate = FALSE) +
     labs(
-      title = paste(strwrap("ERA5 vs. Model-Standardized Annual Budget Difference", width = 35),
+      title = paste(strwrap("ERA5 vs. LUT Annual Budget Difference", width = 35),
                     collapse = "\n"),
+      subtitle = "ERA5 minus LUT balanced budget; positive = ERA5 higher",
       x     = expression(paste(Delta, " Annual budget (g C ", m^-2, " yr"^-1, ")")),
       y     = NULL, fill = "State class"
     ) +
@@ -848,7 +851,7 @@ if (era5_files_present) {
     theme(plot.title = element_text(face = "bold"), legend.position = "bottom",
           axis.text.y = element_text(size = 7))
 
-  ggsave("FIGURES/NEON_ERA5_vs_model_standardized_budget_differences.png",
+  ggsave("FIGURES/NEON_ERA5_vs_lut_budget_differences.png",
          plot_budget_difference, width = FIG_W_HALF, height = FIG_H_TALL, units = "in", dpi = 300)
 
   plot_era5_annual_class_changes <- era5_annual_class_change_matrix %>%
@@ -993,7 +996,46 @@ if (era5_files_present) {
       legend.position = "none"
     )
 
-  plot_era5_diel_flux <- era5_diel_behavior_summary %>%
+  # Smoothness check for diel panels ─────────────────────────────────────────
+  # Fluctuating sites fluctuate between source and sink by definition, so their
+  # mean diel cycle is often erratic (low signal, high inter-site variance).
+  # Compute roughness (sum of squared consecutive differences in source
+  # probability) for each behavior class.  If Fluctuating is > 2× the median
+  # roughness of the other two classes, drop it from both diel panels.
+  diel_roughness <- era5_diel_behavior_summary %>%
+    arrange(annual_behavior, hour_num) %>%
+    group_by(annual_behavior) %>%
+    summarise(
+      roughness = sum(diff(mean_source_probability)^2, na.rm = TRUE),
+      .groups   = "drop"
+    )
+
+  fluct_rough  <- diel_roughness %>%
+    filter(annual_behavior == "Fluctuating") %>% pull(roughness)
+  other_median <- diel_roughness %>%
+    filter(annual_behavior != "Fluctuating") %>%
+    summarise(m = median(roughness, na.rm = TRUE)) %>% pull(m)
+
+  smooth_threshold <- 2   # Fluctuating must be ≤ this × other median to be shown
+  show_fluctuating_diel <- !(
+    length(fluct_rough)  > 0 && !is.na(fluct_rough)  &&
+    length(other_median) > 0 && !is.na(other_median) &&
+    fluct_rough > smooth_threshold * other_median
+  )
+
+  if (!show_fluctuating_diel) {
+    message(sprintf(
+      "Diel panels: removing Fluctuating (roughness %.4f > %.0f× other median %.4f).",
+      fluct_rough, smooth_threshold, other_median))
+  }
+
+  era5_diel_smooth <- if (show_fluctuating_diel) {
+    era5_diel_behavior_summary
+  } else {
+    era5_diel_behavior_summary %>% filter(annual_behavior != "Fluctuating")
+  }
+
+  plot_era5_diel_flux <- era5_diel_smooth %>%
     ggplot(aes(x = hour_num, y = mean_flux_umolC_m2_s,
                color = annual_behavior, fill = annual_behavior)) +
     geom_hline(yintercept = 0, linetype = "dashed", color = "grey55") +
@@ -1015,7 +1057,7 @@ if (era5_files_present) {
     guides(fill = "none", color = guide_legend(nrow = 1, order = 2, override.aes = list(linewidth = 1.2))) +
     theme(legend.position = "none", plot.title = element_text(face = "bold", size = 12))
 
-  plot_era5_diel_source_probability <- era5_diel_behavior_summary %>%
+  plot_era5_diel_source_probability <- era5_diel_smooth %>%
     ggplot(aes(x = hour_num, y = mean_source_probability,
                color = annual_behavior, fill = annual_behavior)) +
     geom_ribbon(

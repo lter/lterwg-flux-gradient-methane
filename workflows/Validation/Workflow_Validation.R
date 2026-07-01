@@ -1,8 +1,7 @@
-DirRepo.ch4 <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
+DirRepo.ch4 <-"/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
+DirRepo.eval <-"/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
 
-DirRepo.eval <-"/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
-
-setwd(DirRepo.ch4)
+setwd( "/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane")
 localdir <- '/Volumes/MaloneLab/Research/FluxGradient'
 localdir.ch4 <- '/Volumes/MaloneLab/Research/FluxGradient/Validation_Sites'
 
@@ -37,10 +36,21 @@ fileSave <- fs::path(localdir.ch4, paste0("SITESval_WP_9min_FILTER_CH4.Rdata"))
 save( SITESval_WP_9min_FILTER,file=fileSave)
 googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-source(fs::path(DirRepo.ch4,'workflows/flow.map.R')) # Makes Map but also create a canopy file needed below.
+#source(fs::path(DirRepo.ch4,'workflows/flow.map.R')) # Makes Map but also create a canopy file needed below.
 
 source(fs::path(DirRepo.ch4,'workflows/Validation/flow.RSHP_VAL.R'))
 
 source(fs::path(DirRepo.ch4,'workflows/Validation/flow.DIEL.VAL.R'))
 
 source(fs::path(DirRepo.ch4,'workflows/Validation/flow.Val.plots.R'))
+
+#Explains why sites show specific patterns and how those patterns scale temporally-
+source(fs::path(DirRepo.ch4,'workflows/Validation/flow.30min.analysis.VAL.R'))  # makes files needed below
+source(fs::path(DirRepo.ch4,'workflows/Validation/Val.ERA5.HalfHourlyGapfill.R')) # Gap-fills the data
+
+# Supplemental Justifications
+source(fs::path(DirRepo.ch4,'workflows/Validation/VAL_Justification_Supplement.R'))
+
+
+
+

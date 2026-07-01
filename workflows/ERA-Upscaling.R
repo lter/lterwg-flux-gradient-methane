@@ -356,12 +356,25 @@ prediction_grid <- stage2_rate_by_ecotype_class %>%
     mean_ERA5_VSWC = replace_na(mean_ERA5_VSWC, mean(annual_flux_model_data$mean_ERA5_VSWC, na.rm = TRUE))
   )
 
-flux_predictions <- predict(stage2_flux_model, newdata = prediction_grid, se.fit = TRUE)
+# Only predict for exchange_class levels present in training data.
+# If no "Fluctuating" sites exist in the new gapfill run, the lm drops that
+# level from its xlevels and predict() would error on unseen levels.
+# Rows with untrained levels get NA rates (left_join produces NA).
+trained_exchange_levels <- levels(droplevels(annual_flux_model_data$exchange_class))
+prediction_grid_trained <- prediction_grid %>%
+  filter(as.character(exchange_class) %in% trained_exchange_levels)
+
+flux_predictions <- predict(stage2_flux_model, newdata = prediction_grid_trained, se.fit = TRUE)
 
 stage2_rate_by_ecotype_class <- prediction_grid %>%
-  mutate(
-    model_rate_gC_m2_yr = as.numeric(flux_predictions$fit),
-    model_rate_se_gC_m2_yr = as.numeric(flux_predictions$se.fit)
+  left_join(
+    prediction_grid_trained %>%
+      mutate(
+        model_rate_gC_m2_yr    = as.numeric(flux_predictions$fit),
+        model_rate_se_gC_m2_yr = as.numeric(flux_predictions$se.fit)
+      ) %>%
+      dplyr::select(EcoType, exchange_class, model_rate_gC_m2_yr, model_rate_se_gC_m2_yr),
+    by = c("EcoType", "exchange_class")
   ) %>%
   dplyr::select(
     EcoType, exchange_class, n_site_years, n_sites,

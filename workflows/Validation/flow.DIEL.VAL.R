@@ -9,10 +9,8 @@ library(colorspace)
 
 load( fs::path(localdir,paste0("/Validation_Sites/SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata")) )
 
-DirRepo.CH4 <- "/Users/sm3466/YSE Dropbox/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
-
-source( fs::path(DirRepo.CH4, paste('/functions/calc_diel_ch4.R')))
-source( fs::path(DirRepo.CH4, paste('/functions/calc_Q10.R')))
+source( fs::path(DirRepo.ch4, paste('/functions/calc_diel_ch4.R')))
+source( fs::path(DirRepo.ch4, paste('/functions/calc_Q10.R')))
 
 canopy.info <- read.csv( file.path(paste(localdir, "Val_canopy.csv", sep="/")))%>% rename(Site = SITE_ID) %>% 
   mutate(EcoType = case_when( IGBP == 'ENF' ~ 'Forest',
@@ -53,7 +51,7 @@ for( site in site.list){
              season = Season) %>% 
       distinct %>% filter(gas == "CH4")
     
-    data$FG_mean <- data[, opt]
+    data$FG_mean <- data[[opt]]
     message( paste("Running DIEL functions- CH4 for ", site))
     # Calculate Diurnal Patterns by Year-month:
     
@@ -204,7 +202,7 @@ ENSEMBLE_Q10_eq4c_wide %>% ggplot( aes( x= Q10.mean_EC, y=Q10.mean_FG, col=SITE_
 
 ENSEMBLE_Q10_eq4c_wide %>% ggplot( aes( x= Rref.mean_EC, y=Rref.mean_FG, col=SITE_ID)) +
   geom_point() + 
-  geom_smooth(method = "lm", se =, size=0.5, col="grey40",formula = 'y ~ x + 0' ) +
+  geom_smooth(method = "lm", se = FALSE, size=0.5, col="grey40",formula = 'y ~ x + 0' ) +
   stat_regline_equation(aes(label = ..eq.label..), 
                         col='black', size =3.5,
                         formula = 'y ~ x + 0', fontface=2,
