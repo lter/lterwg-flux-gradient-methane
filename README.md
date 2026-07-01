@@ -49,23 +49,43 @@ Scripts are named `##_STEP_Description.R` where `##` is the run order and `STEP`
 
 Deprecated scripts have been moved to `workflows/depreciaded/` and are not part of the active workflow.
 
+## Validation Workflow
+
+The validation pipeline is independent of the main workflow and lives in `workflows/Validation/`. It tests the flux-gradient method against co-located eddy-covariance measurements at three tower sites: SE-Sto (Sweden), SE-Svb (Sweden), and US-Uaf (Alaska).
+
+Run the validation end-to-end by sourcing `workflows/Validation/Workflow_Validation.R`. Validation scripts follow the same `##_VAL_Description.R` naming convention.
+
+**Validation Scripts**
+
+- `01_VAL_FilterQC.R` — Applies quality filters to raw validation site gradient flux data and computes QC flags.
+- `02_VAL_SensorHeightPairs.R` — Identifies representative sensor height pairs (RSHP) for each validation site using CCC for CO2 and H2O.
+- `03_VAL_DielAnalysis.R` — Diel CH4 flux analysis by season for ensemble flux data at validation sites.
+- `04_VAL_Figures.R` — Validation figures comparing flux-gradient and eddy-covariance flux products.
+- `05_VAL_FluxAnalysis.R` — 30-min, daily, and annual flux analysis for both FG and EC fluxes through parallel pipelines for direct comparison.
+- `06_VAL_ERA5Gapfill.R` — ERA5-driven half-hourly gap-filling for FG and EC fluxes at validation sites; adapted from `06_NEON_ERA5Gapfill.R`.
+- `07_VAL_Supplement.R` — Supplemental figures justifying the FG validation approach (CCC metrics, bias assessment).
+- `VAL_CounterGradientFilter.R` — Exploratory counter-gradient QC filter; not part of the main pipeline, retained for reference.
+
 ## Folder Structure
 
 ```
-workflows/         # Numbered workflow scripts (01–17) + WorkFlow.R
-  check/           # QC audit scripts and diagnostic figures
-  depreciaded/     # Archived scripts no longer used in main workflow
-  Validation/      # Validation workflow (independent of main pipeline)
-functions/         # Shared R functions sourced by workflow scripts
-exploratory/       # Exploratory analyses (not part of main workflow)
-FIGURES/           # Output figures
+workflows/
+  WorkFlow.R           # Master script — sources steps 01–17 in order
+  01–17_*.R            # Numbered workflow scripts (NEON, Global, Supp)
+  13alt_*, 14alt_*.R   # Alternative non-RF upscaling scripts (not in main workflow)
+  Validation/          # Independent validation pipeline (steps 01–07)
+  check/               # QC audit scripts and diagnostic figures
+  depreciaded/         # Archived scripts no longer used in any workflow
+functions/             # Shared R functions sourced by workflow scripts
+exploratory/           # Exploratory analyses (not part of main workflow)
+FIGURES/               # Output figures
 ```
 
 ## Naming Convention
 
 Workflow scripts follow the pattern `##_STEP_Description.R`:
-- `##` — two-digit run order (01–17)
-- `STEP` — major phase: `NEON`, `Global`, or `Supp`
+- `##` — two-digit run order
+- `STEP` — major phase: `NEON`, `Global`, `Supp`, or `VAL` (validation)
 - `Description` — brief CamelCase description of what the script does
 
 ## Contributing Guidelines & Style Guide
