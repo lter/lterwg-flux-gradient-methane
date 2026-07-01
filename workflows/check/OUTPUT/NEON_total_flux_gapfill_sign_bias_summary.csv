@@ -1,3 +1,0 @@
-interpretable_budget,n_site_years,n_observed_source,n_gapfilled_source,n_sign_flips,n_sink_to_source,n_source_to_sink,median_budget_difference_gC_m2_yr,median_observed_positive_interval_fraction,median_gapfilled_positive_interval_fraction,median_delta_positive_interval_fraction,median_delta_mean_mgC_30min
-TRUE,46,41,43,4,3,1,0.0666650739732296,0.7014149746796304,0.8460139110307298,0.1192649424701897,0.004131243974337442
-FALSE,74,60,61,15,8,7,0.05614664364080417,0.6534053293611387,0.8437220145097206,0.15206220396873005,-2.683928388147206e-5
