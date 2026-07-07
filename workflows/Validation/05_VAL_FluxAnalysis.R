@@ -1,9 +1,12 @@
 # Validation tower CH4 flux products — 30-min, daily, and annual scales
 #
 # Adapted from flow.30min.analysis.R for SE-Sto, SE-Svb, and US-Uaf validation towers.
-# Processes BOTH flux-gradient (FG_mean) and co-located eddy-covariance (EC_mean) fluxes
-# through the same pipeline so their 30-min, daily, and annual estimates can be directly
-# compared.
+# Processes BOTH total flux-gradient (FG_total = FG_mean + storage flux, from
+# 02b_VAL_TotalFlux.R) and co-located eddy-covariance (EC_mean) fluxes through
+# the same pipeline so their 30-min, daily, and annual estimates can be
+# directly compared -- EC_mean inherently includes storage, so FG needs it
+# added too for a fair comparison. Falls back to FG_mean (no storage term)
+# if SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata isn't available.
 #
 # Pipeline:
 #   1. Load harmonised 30-min median ensemble data (SITEval_DATA_FILTERED_RSHPc_H)
@@ -45,15 +48,22 @@ dir.create("OUTPUT",  showWarnings = FALSE, recursive = TRUE)
 dir.create("FIGURES", showWarnings = FALSE, recursive = TRUE)
 
 # ── Input: load or reconstruct SITEval_DATA_FILTERED_RSHPc_H ─────────────────
-# Primary: SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata (output of flow.RSHP_VAL.R)
+# Primary: SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata (output of
+#   02b_VAL_TotalFlux.R), which provides FG_total alongside FG_mean/EC_mean.
 # Fallback: reconstruct from SITEval_DATA_FILTERED_CH4.Rdata + CCC_CH4.Rdata
 #   using the same canopy filter (AA/AW only) + CCC > 0 + 30-min harmonisation
-#   that flow.RSHP_VAL.R applies.
+#   that flow.RSHP_VAL.R applies. This fallback has no storage flux input, so
+#   FG_total is set equal to FG_mean in that case (see below).
 
-ensemble_file <- file.path(localdir.val, "SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata")
+total_flux_file <- file.path(localdir.val, "SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata")
+ensemble_file    <- file.path(localdir.val, "SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata")
 
-if (file.exists(ensemble_file)) {
-  message("Loading ", ensemble_file)
+if (file.exists(total_flux_file)) {
+  message("Loading ", total_flux_file)
+  load(total_flux_file)   # provides SITEval_DATA_FILTERED_RSHPc_H_total (has FG_total)
+} else if (file.exists(ensemble_file)) {
+  message("SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata not found — ",
+          "falling back to FG_mean (no storage flux term). Run 02b_VAL_TotalFlux.R for FG_total.")
   load(ensemble_file)   # provides SITEval_DATA_FILTERED_RSHPc_H
 } else {
   message("SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata not found — reconstructing from raw files.")
@@ -130,8 +140,19 @@ if (file.exists(ensemble_file)) {
           paste(names(SITEval_DATA_FILTERED_RSHPc_H), collapse = ", "))
 }
 
+# Ensure FG_total exists regardless of which branch above ran: the primary
+# path already has it (from 02b_VAL_TotalFlux.R); the ensemble-only and
+# reconstruction fallbacks don't have a storage term, so FG_total is set
+# equal to FG_mean in those cases (storage_added = FALSE throughout).
+if (!exists("SITEval_DATA_FILTERED_RSHPc_H_total")) {
+  SITEval_DATA_FILTERED_RSHPc_H_total <- purrr::map(
+    SITEval_DATA_FILTERED_RSHPc_H,
+    ~ dplyr::mutate(.x, FG_total = FG_mean, storage_added = FALSE)
+  )
+}
+
 # ── Constants ─────────────────────────────────────────────────────────────────
-# FG_mean and EC_mean are in µmol CH4 m⁻² s⁻¹ (same units as NEON flux_total).
+# FG_total and EC_mean are in µmol CH4 m⁻² s⁻¹ (same units as NEON flux_total).
 # Conversion to mg C m⁻² 30min⁻¹ follows NEON convention:
 #   2 × 0.0000288872 × 1000  =  µmol/s × (1800 s/30min) × (12 µg C/µmol) / (1e6 µg/g) × (1e3 mg/g)
 #
@@ -154,9 +175,9 @@ mg_c_30min_to_umol_c_s <- function(x) x * 1000 / ug_c_per_umol_c / seconds_per_3
 
 # ── Build 30-min data frame (FG + EC) ─────────────────────────────────────────
 # Use CCC-filtered, harmonised 30-min ensemble (CCC > 0 per height pair).
-# Filter to CH4 only; both FG and EC are kept as parallel columns.
+# Filter to CH4 only; both FG_total and EC are kept as parallel columns.
 
-ch4_30min <- purrr::imap_dfr(SITEval_DATA_FILTERED_RSHPc_H, function(df, site) {
+ch4_30min <- purrr::imap_dfr(SITEval_DATA_FILTERED_RSHPc_H_total, function(df, site) {
   df %>%
     filter(gas == "CH4") %>%
     mutate(SITE_ID = site)
@@ -175,7 +196,7 @@ ch4_30min <- purrr::imap_dfr(SITEval_DATA_FILTERED_RSHPc_H, function(df, site) {
     season       = factor(coalesce(Season, "Summer"),
                           levels = c("Winter", "Spring", "Summer", "Autumn")),
     # Convert both fluxes to mg C m⁻² 30min⁻¹
-    CH4_FG_mgC_30min = FG_mean * flux_to_mgC_30min,
+    CH4_FG_mgC_30min = FG_total * flux_to_mgC_30min,
     CH4_EC_mgC_30min = EC_mean * flux_to_mgC_30min,
     # log_PAR for GAM (matches NEON covariate)
     log_PAR      = log1p(pmax(PAR, 0)),

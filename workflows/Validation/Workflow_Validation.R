@@ -1,7 +1,15 @@
 # Workflow_Validation.R
 # Master workflow for validation of NEON CH4 flux-gradient methods against
 # co-located eddy-covariance towers (SE-Sto, SE-Svb, US-Uaf).
-# Run scripts in order (01 -> 07). Each step sources a numbered workflow script.
+# Run scripts in order (01 -> 02 -> 02a -> 02b -> 05 -> 07). Each step sources
+# a numbered workflow script. Steps 03/04 (diel CH4 analysis + its figures)
+# have been removed -- see workflows/Validation/03_VAL_DielAnalysis.R for why.
+#
+# Steps 02a/02b are new: 02a estimates storage flux (single-point
+# approximation, all three sites) and 02b adds it to the ensemble gradient
+# flux to produce FG_total, which 05/07 now use in place of FG_mean wherever
+# they compare against EC_mean (EC inherently includes storage; FG does not
+# until 02b has run).
 
 library(tidyverse)
 library(ggplot2)
@@ -9,6 +17,7 @@ library(ggpubr)
 library(sf)
 
 # -------------- Change this stuff -------------
+DirRepo      <- "/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient"
 DirRepo.ch4  <- "/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-methane"
 DirRepo.eval <- "/Users/sm3466/Library/CloudStorage/Dropbox-YSE/Sparkle Malone/Research/FluxGradient/lterwg-flux-gradient-eval"
 
@@ -50,13 +59,25 @@ googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 message('Step 02: Identifying sensor height pairs...')
 source(fs::path(DirRepo.ch4, 'workflows/Validation/02_VAL_SensorHeightPairs.R'))
 
-# 03 Diel CH4 flux analysis by season for validation sites
-message('Step 03: Diel analysis...')
-source(fs::path(DirRepo.ch4, 'workflows/Validation/03_VAL_DielAnalysis.R'))
+# 02a Estimate storage flux for validation sites (single-point approximation,
+# all three sites -- replaces the multi-level column-integration method,
+# which never clears its 3-level minimum at SE-Sto/SE-Svb). Also includes
+# the SE-Sto raw-unit correction (P_kPa hPa/kPa mislabel; CH4 ppm/ppb
+# mislabel) -- see apply_site_unit_corrections() in flow.validation.storage.R.
+message('Step 02a: Estimating storage flux (single-point)...')
+source(fs::path(DirRepo, 'workflows/Validation/flow.validation.storage.R'))
+source(fs::path(DirRepo, 'workflows/Validation/VAL_StorageFlux_SinglePoint.R'))
 
-# 04 Validation figures comparing FG and EC flux products
-message('Step 04: Validation figures...')
-source(fs::path(DirRepo.ch4, 'workflows/Validation/04_VAL_Figures.R'))
+# 02b Combine ensemble gradient flux with single-point storage flux to
+# produce FG_total (fallback to FG_mean alone where no storage estimate is
+# available for that half-hour; storage_added flags which case applies).
+message('Step 02b: Computing total flux (gradient + storage)...')
+source(fs::path(DirRepo.ch4, 'workflows/Validation/02b_VAL_TotalFlux.R'))
+
+# 03/04 REMOVED: diel CH4 analysis (brms Q10/Rref fitting) and its figures.
+# FG-vs-EC agreement is fully covered by 05 and 07 without the brms MCMC
+# cost. See workflows/Validation/03_VAL_DielAnalysis.R for the rationale and
+# how to restore if the diurnal-pattern/Q10 comparison is needed later.
 
 # 05 30-min, daily, and annual flux analysis for FG and EC (parallel pipelines)
 message('Step 05: 30-min flux analysis...')

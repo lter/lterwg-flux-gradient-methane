@@ -1,8 +1,10 @@
 # VAL_Justification_Supplement.R
 # Generates publication figures for the FG validation supplement.
+# FG figures use FG_total (gradient + storage flux, from 02b_VAL_TotalFlux.R)
+# rather than FG_mean alone, since EC_mean inherently includes storage.
 #
 # Requires (in localdir.ch4):
-#   SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata
+#   SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata
 #   CCC_CH4.Rdata
 #   VAL_RSHP_pairs.Rdata
 #
@@ -61,7 +63,7 @@ rshp_selected <- list(
 )
 
 # ── Load data ──────────────────────────────────────────────────────────────────
-load(fs::path(localdir.ch4, "SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata"))
+load(fs::path(localdir.ch4, "SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata"))
 load(fs::path(localdir.ch4, "CCC_CH4.Rdata"))
 load(fs::path(localdir.ch4, "VAL_RSHP_pairs.Rdata"))
 
@@ -223,9 +225,9 @@ message("Saved ValSupp_Fig2_CCC.png")
 
 scatter_list <- imap(site_meta, function(meta, site) {
 
-  df <- SITEval_DATA_FILTERED_RSHPc_H[[site]] %>%
+  df <- SITEval_DATA_FILTERED_RSHPc_H_total[[site]] %>%
     filter(gas == "CH4") %>%
-    mutate(FG = FG_mean * unit,
+    mutate(FG = FG_total * unit,
            EC = EC_mean * unit) %>%
     drop_na(FG, EC) %>%
     filter(is.finite(FG), is.finite(EC)) %>%
@@ -289,9 +291,9 @@ message("Saved ValSupp_Fig3_FGvsEC.png")
 
 # Seasonal mean fluxes
 seasonal_summary <- imap_dfr(site_meta, function(meta, site) {
-  SITEval_DATA_FILTERED_RSHPc_H[[site]] %>%
+  SITEval_DATA_FILTERED_RSHPc_H_total[[site]] %>%
     filter(gas == "CH4") %>%
-    mutate(FG = FG_mean * unit,
+    mutate(FG = FG_total * unit,
            EC = EC_mean * unit) %>%
     drop_na(FG, EC) %>%
     filter(is.finite(FG), is.finite(EC)) %>%
@@ -332,9 +334,9 @@ p_ratio <- ggplot(seasonal_summary,
 
 # Annual pseudo-budget bar chart (FG and EC side by side)
 annual_summary <- imap_dfr(site_meta, function(meta, site) {
-  df <- SITEval_DATA_FILTERED_RSHPc_H[[site]] %>%
+  df <- SITEval_DATA_FILTERED_RSHPc_H_total[[site]] %>%
     filter(gas == "CH4") %>%
-    mutate(FG = FG_mean * unit,
+    mutate(FG = FG_total * unit,
            EC = EC_mean * unit) %>%
     drop_na(FG, EC) %>%
     filter(is.finite(FG), is.finite(EC))
