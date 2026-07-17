@@ -1,6 +1,7 @@
 # WorkFlow.R
 # Master workflow for NEON CH4 flux-gradient analysis and global budget.
-# Run scripts in order (01 -> 17). Each step sources a numbered workflow script.
+# Run scripts in order (01 -> 17, then 19). Each step sources a numbered
+# workflow script. (18 is reserved/not yet in use.)
 
 library(tidyverse)
 library(ggplot2)
@@ -91,11 +92,25 @@ source(fs::path(DirRepo.ch4, 'workflows/10_Global_DownloadERA5Land.R'))
 message('Step 11: Download MODIS/WAD2M...')
 source(fs::path(DirRepo.ch4, 'workflows/11_Global_DownloadMODIS_WAD2M.R'))
 
-# 12 Condition-based upland CH4 source-probability model
-message('Step 12: Source probability model...')
-source(fs::path(DirRepo.ch4, 'workflows/12_Global_SourceProbability.R'))
+# 12 Fit and test the source-probability and magnitude Random Forest models
+message('Step 12: Source-probability/magnitude model fitting...')
+source(fs::path(DirRepo.ch4, 'workflows/12_SourceProp_MagnitudeModels.R'))
+
+# 12b Model-performance figures (calibration, classification skill, variable
+# importance, obs-vs-fitted magnitude) — depends only on 12's outputs, so it
+# runs right after fitting rather than after the spatial upscaling step
+message('Step 12b: Model-performance figures...')
+source(fs::path(DirRepo.ch4, 'workflows/12b_Model_FIGURES_RF.R'))
+
+# 12c Leave-one-site-out generalization test for the Stage 2 magnitude
+# models — refits N+1 times internally (diagnostic only, does not touch the
+# production model bundle 13 uses). Slower than the other steps; comment
+# out if a quick re-run of the pipeline is all that's needed.
+message('Step 12c: Leave-one-site-out generalization test...')
+source(fs::path(DirRepo.ch4, 'workflows/12c_GeneralizationTest.R'))
 
 # 13 Random Forest spatial upscaling (monthly, three flux-expression approaches)
+# — applies the models 12 just fit to the global grid; does not fit anything itself
 message('Step 13: RF spatial upscaling...')
 source(fs::path(DirRepo.ch4, 'workflows/13_Global_SpatialUpscalingRF.R'))
 
@@ -116,6 +131,12 @@ source(fs::path(DirRepo.ch4, 'workflows/16_Supp_GapfillUncertainty.R'))
 # 17 Supplemental: spatial budget uncertainty from systematic flux bias
 message('Step 17: Budget uncertainty supplement...')
 source(fs::path(DirRepo.ch4, 'workflows/17_Supp_BudgetUncertainty.R'))
+
+# 18 No longer needed
+
+# 19 Supplemental: NEON site representativeness vs. global upland ecosystems
+message('Step 19: NEON representativeness supplement...')
+source(fs::path(DirRepo.ch4, 'workflows/19_Supp_NEONRepresentativeness.R'))
 
 # ── DEPRECATED (not run in main workflow — kept for reference) ────────────────
 # Scripts below have been moved to workflows/depreciaded/

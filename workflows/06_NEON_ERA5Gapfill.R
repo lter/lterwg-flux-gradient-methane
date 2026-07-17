@@ -1230,6 +1230,7 @@ era5_diel_behavior_summary <- era5_site_diel_30min %>%
     .by = c(annual_behavior, hour_num),
     n_sites = n_distinct(SITE_ID),
     mean_flux_umolC_m2_s = mean(flux_umolC_m2_s, na.rm = TRUE),
+    median_flux_umolC_m2_s = median(flux_umolC_m2_s, na.rm = TRUE),
     sd_flux_umolC_m2_s = sd(flux_umolC_m2_s, na.rm = TRUE),
     se_flux_umolC_m2_s = sd_flux_umolC_m2_s / sqrt(n_sites),
     mean_source_probability = mean(source_probability, na.rm = TRUE),

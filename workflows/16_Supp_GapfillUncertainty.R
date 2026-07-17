@@ -41,6 +41,41 @@ if (!exists("era5_gapfilled_30min") ||
                   ncol(era5_gapfilled_30min)))
 }
 
+# ── Ensure behavior_levels/behavior_colors exist (normally inherited from
+#    06_NEON_ERA5Gapfill.R when scripts run in sequence via WorkFlow.R) ──────
+# This script has no other guard for these, so sourcing it on its own (or
+# after a session where they were never set) throws a *different* error than
+# the era5_gapfilled_30min guard above catches — e.g.
+# "subscript out of bounds" on behavior_colors[["Weak-source"]] rather than
+# "object not found" — same underlying issue (missing prerequisite), just
+# manifesting differently because the code indexes into it instead of
+# reading it directly. Defining canonically here (same values as script 06)
+# makes this script runnable standalone, matching the fallback already used
+# for era5_gapfilled_30min above.
+if (!exists("behavior_levels") || !exists("behavior_colors") ||
+    !all(c("Weak-sink", "Fluctuating", "Weak-source") %in% names(behavior_colors))) {
+  message("behavior_levels/behavior_colors not found in environment (or incomplete) — ",
+          "defining canonically (same as 06_NEON_ERA5Gapfill.R).")
+  behavior_levels <- c("Weak-sink", "Fluctuating", "Weak-source")
+  behavior_colors <- c(
+    "Weak-sink"   = "#2166AC",
+    "Fluctuating" = "#4D4D4D",
+    "Weak-source" = "#B2182B"
+  )
+}
+
+# ── Ensure era5_mean_annual_budget is loaded (same fallback pattern as
+#    era5_gapfilled_30min above) — the other prerequisite from
+#    06_NEON_ERA5Gapfill.R this script never guarded for.
+if (!exists("era5_mean_annual_budget")) {
+  budget_csv <- file.path(getwd(), "OUTPUT/NEON_ERA5_gapfilled_mean_annual_budget.csv")
+  if (!file.exists(budget_csv))
+    stop("era5_mean_annual_budget not found in environment and no cached file at: ", budget_csv,
+         "\nPlease run 06_NEON_ERA5Gapfill.R first.")
+  message("Loading era5_mean_annual_budget from CSV...")
+  era5_mean_annual_budget <- read.csv(budget_csv) %>% as_tibble()
+}
+
 # ── Scale factors to test ─────────────────────────────────────────────────────
 scale_factors <- c(0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
 scale_labels  <- c("0.5×", "0.75×", "1.0×\n(baseline)", "1.25×", "1.5×", "2.0×")

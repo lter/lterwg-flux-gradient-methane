@@ -1,6 +1,13 @@
 # Monthly condition-based spatial CH4 upscaling — Random Forest, three approaches.
 #
-# Single Stage 1 P(source) model (1:1 balanced RF), three flux expression approaches:
+# Spatial projection ONLY: loads the source-probability and magnitude models
+# already fit and tested by 12_SourceProp_MagnitudeModels.R (via
+# source_magnitude_model_bundle.rds) and applies them to the global upland
+# grid, month by month, 2000-2025. Does not fit or evaluate any model
+# itself — see 12_SourceProp_MagnitudeModels.R for training, OOB skill, and
+# the FLUXNET-CH4 external validation.
+#
+# Three flux expression approaches, sharing the same Stage 1/Stage 2 models:
 #
 #   Approach 1 — Continuous:
 #     flux = P(source) × source_mag + (1 − P(source)) × sink_mag
@@ -10,41 +17,39 @@
 #     Hard threshold at P(source) ≥ 0.5; assigns cell entirely to source or sink flux.
 #
 #   Approach 3 — All-Sink (theoretical maximum sink):
-#     Every non-arid upland cell is assigned the sink magnitude regardless of
+#     Every upland cell is assigned the sink magnitude regardless of
 #     P(source). This represents the most extreme possible terrestrial sink
 #     estimate derivable from ecosystem-scale observations.
 #     A GMB threshold sensitivity sweep (0.30–0.99) is retained as a diagnostic
 #     showing that even forcing all cells to sinks never recovers the GMB target.
 #
-# Stage 1 (single balanced RF):
-#   - Training data downsampled to 1:1 source:sink (equal class representation)
-#   - Regularised probability forest: min.node.size = 20, max.depth = 8,
-#     sample.fraction = 0.7 without replacement
-#   - OOB predictions used for honest AUC and isotonic calibration
-#
-# Stage 2 (shared across all approaches):
-#   - ranger log-absolute-flux regression, trained on full data
+# "Arid" is classified here the SAME way 12_SourceProp_MagnitudeModels.R
+# classified it for training — aridity_index < arid_ai_threshold (loaded
+# from the model bundle, not redefined here) — not the biome/MODIS raster's
+# own "desert" class. P(source) IS hard-forced to 0 for Arid cells: the
+# only 2 NEON sites crossing this threshold (JORN, SRER) are empirically
+# 100% weak-source, an unrepresentative sample for learning a genuine
+# P(source) pattern, so 12_SourceProp_MagnitudeModels.R excludes Arid from
+# Stage 1 and Stage 2's source model entirely and this script asserts that
+# design (model_bundle$arid_forced_sink) rather than assuming it. Arid
+# cells are instead routed deterministically through the sink magnitude
+# model, which extrapolates from Forest/Grassland/Shrubland sink behavior
+# via the shared continuous covariates.
 #
 # Outputs: /Volumes/MaloneLab/Research/FluxGradient/METHANE/Upscaling_Monthly_RF/OUTPUT/
 
 library(tidyverse)
-library(data.table)
 library(terra)
 library(ranger)
-library(patchwork)
-library(cowplot)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-localdir.ch4 <- Sys.getenv("LOCALDIR_CH4",
-  unset = "/Volumes/MaloneLab/Research/FluxGradient/Methane")
 spatial_dir <- Sys.getenv("MONTHLY_UPSCALING_DIR",
   unset = "/Volumes/MaloneLab/Research/FluxGradient/METHANE/Upscaling_Monthly")
 rf_dir <- Sys.getenv("MONTHLY_RF_DIR",
   unset = "/Volumes/MaloneLab/Research/FluxGradient/METHANE/Upscaling_Monthly_RF")
 
-if (!dir.exists(localdir.ch4)) stop("CH4 data directory not found: ", localdir.ch4)
-if (!dir.exists(spatial_dir))  stop("GLM directory not found (needed for comparison): ", spatial_dir)
+if (!dir.exists(spatial_dir)) stop("GLM directory not found (needed for comparison): ", spatial_dir)
 
 output_dir <- file.path(rf_dir, "OUTPUT")
 figure_dir <- file.path(rf_dir, "FIGURES")
@@ -53,55 +58,87 @@ dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(figure_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(data_dir,   showWarnings = FALSE, recursive = TRUE)
 
-glm_output_dir     <- file.path(spatial_dir, "OUTPUT")
-era5_30min_file    <- file.path(localdir.ch4, "OUTPUT/NEON_ERA5_gapfilled_30min.csv.gz")
-site_behavior_file <- file.path(localdir.ch4, "OUTPUT/30min_site_behavior.csv")
 ecoregions_zip     <- file.path(spatial_dir,  "Ecoregions2017.zip")
 era5_land_dir      <- file.path(spatial_dir,  "DATA/era5_land_monthly")
 modis_ecotype_dir  <- file.path(spatial_dir,  "DATA/modis_mcd12c1_processed")
 wad2m_dir          <- file.path(spatial_dir,  "DATA/wad2m")
 
-missing_files <- c(era5_30min_file, site_behavior_file, ecoregions_zip)[
-  !file.exists(c(era5_30min_file, site_behavior_file, ecoregions_zip))]
-if (length(missing_files) > 0) stop("Missing: ", paste(missing_files, collapse = ", "))
+ecoregions_extracted_dir <- file.path(data_dir, "ecoregions2017")
+ecoregions_already_extracted <- length(list.files(ecoregions_extracted_dir,
+  pattern = "Ecoregions2017\\.shp$")) > 0
 
-# ── Scalar parameters ─────────────────────────────────────────────────────────
+model_bundle_file <- file.path(output_dir, "source_magnitude_model_bundle.rds")
 
-binary_threshold            <- 0.5          # fixed threshold for approaches 1 & 2
+required_files <- c(model_bundle_file)
+if (!ecoregions_already_extracted) required_files <- c(required_files, ecoregions_zip)
+
+missing_files <- required_files[!file.exists(required_files)]
+if (length(missing_files) > 0)
+  stop("Missing: ", paste(missing_files, collapse = ", "),
+       "\n(", model_bundle_file, " is written by 12_SourceProp_MagnitudeModels.R — run that first.)")
+
+# MODIS land-cover files are required, not optional. The Ecoregions2017
+# biome-based fallback (built below regardless, for defensiveness) has no
+# concept of cropland, urban, or wetland at all -- it classifies purely by
+# ecoregion/biome, so a city or farm field sitting inside a temperate
+# forest ecoregion would be silently counted as Forest upland. The MODIS
+# path is what actually excludes those land-cover classes (see script
+# 11_Global_DownloadMODIS_WAD2M.R's classify_modis_to_ecotype(): IGBP Water,
+# Permanent Wetlands, Urban and Built-up, and Snow/Ice all map to NA;
+# Croplands map to a code ecotype_lookup below filters out). Silently
+# falling back to the biome-only method would silently reintroduce
+# cropland/urban/wetland cells into the upland grid, so this stops instead.
+modis_files_check <- list.files(modis_ecotype_dir,
+  pattern = "^MODIS_MCD12C1_ecotype_[0-9]{4}\\.tif$", full.names = TRUE)
+if (length(modis_files_check) == 0)
+  stop("No MODIS land-cover files found in ", modis_ecotype_dir,
+       ". These are required to exclude cropland/urban/wetland cells from ",
+       "the upland grid (the Ecoregions-biome fallback cannot do this). ",
+       "Run 11_Global_DownloadMODIS_WAD2M.R first.")
+
+# ── Load fitted models (12_SourceProp_MagnitudeModels.R) ──────────────────────
+# Loading scalar thresholds from the bundle too (not redefining them here) is
+# deliberate: arid_ai_threshold/aridity_mat_floor/binary_threshold drifting
+# apart between the fitting script and this one is exactly how the
+# Arid-EcoType bug happened before.
+
+message("Loading fitted models from ", model_bundle_file, " ...")
+model_bundle <- readRDS(model_bundle_file)
+
+rf_model_A              <- model_bundle$rf_model_A
+iso_cal_A                <- model_bundle$iso_cal_A
+sink_mag_model            <- model_bundle$sink_mag_model
+source_mag_model          <- model_bundle$source_mag_model
+magnitude_standardizers    <- model_bundle$magnitude_standardizers
+training_vswc_range        <- model_bundle$training_vswc_range
+training_prec_range        <- model_bundle$training_prec_range
+ecotype_levels              <- model_bundle$ecotype_levels
+arid_ai_threshold           <- model_bundle$arid_ai_threshold
+aridity_mat_floor           <- model_bundle$aridity_mat_floor
+binary_threshold            <- model_bundle$binary_threshold
+arid_forced_sink            <- model_bundle$arid_forced_sink
+
+# Asserted rather than silently assumed: if 12_SourceProp_MagnitudeModels.R
+# ever changes how it handles Arid, this script's hard-coded P(source) = 0
+# override below needs to change with it, not silently drift out of sync
+# (the same class of bug arid_ai_threshold/aridity_mat_floor had before).
+if (!isTRUE(arid_forced_sink))
+  stop("Model bundle does not have arid_forced_sink = TRUE -- this script's ",
+       "Arid handling (P(source) hard-forced to 0, sink model only) assumes ",
+       "it does. Re-run 12_SourceProp_MagnitudeModels.R or update this script ",
+       "to match its current Arid design.")
+
+# ── Scalar parameters (spatial-projection only) ────────────────────────────────
+
 gmb_soil_sink_tg_ch4_yr    <- -35           # GMB upland soil sink target
 arid_shrubland_fill_temp_threshold <- 15
-arid_ai_threshold           <- 15
 years_to_process            <- 2000:2025
-rf_seed                     <- 42
-n_trees                     <- 500
-rf_min_node_size            <- 20
-rf_max_depth                <- 8
-rf_sample_frac              <- 0.7
 # Threshold grid for GMB-constrained search (fine steps to allow interpolation)
 gmb_threshold_grid          <- seq(0.30, 0.99, by = 0.01)
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
 gC_m2_yr_to_tg_ch4 <- function(flux, area_mha) flux * area_mha * 0.0133333333333333
-
-wtd_mean <- function(x, w) {
-  ok <- is.finite(x) & is.finite(w)
-  if (!any(ok)) return(NA_real_)
-  sum(x[ok] * w[ok]) / sum(w[ok])
-}
-
-auc_rank <- function(observed, predicted) {
-  ok <- is.finite(observed) & is.finite(predicted)
-  observed <- observed[ok]; predicted <- predicted[ok]
-  n1 <- sum(observed == 1); n0 <- sum(observed == 0)
-  r  <- rank(predicted, ties.method = "average")
-  (sum(r[observed == 1]) - n1 * (n1 + 1) / 2) / (n1 * n0)
-}
-
-make_standardizer <- function(x) {
-  m <- mean(x, na.rm = TRUE); s <- sd(x, na.rm = TRUE)
-  list(center = m, scale = if (!is.finite(s) || s == 0) 1 else s)
-}
 
 apply_standardizers <- function(dat, std) {
   dat %>% mutate(
@@ -119,41 +156,11 @@ unzip_if_needed <- function(zip_file, exdir, pattern) {
   invisible(list.files(exdir, pattern = pattern, full.names = TRUE))
 }
 
-# ── RF helper functions ────────────────────────────────────────────────────────
-
-class_balance_weights_rf <- function(y) {
-  n <- length(y); tbl <- table(y)
-  as.numeric(n / (length(tbl) * tbl[as.character(y)]))
-}
-
-fit_rf_prob_model <- function(training_data, predictors, use_case_weights = TRUE) {
-  training_data <- training_data %>%
-    mutate(weak_source_f = factor(weak_source, levels = c(0, 1)))
-  fmla <- reformulate(predictors, response = "weak_source_f")
-  cw   <- if (use_case_weights) class_balance_weights_rf(training_data$weak_source) else NULL
-  ranger(
-    formula         = fmla,
-    data            = training_data,
-    num.trees       = n_trees,
-    probability     = TRUE,
-    case.weights    = cw,
-    min.node.size   = rf_min_node_size,
-    max.depth       = rf_max_depth,
-    replace         = FALSE,
-    sample.fraction = rf_sample_frac,
-    importance      = "impurity",
-    seed            = rf_seed
-  )
-}
-
+# Duplicated from 12_SourceProp_MagnitudeModels.R (kept in sync manually,
+# same pattern used between 13/19) — this script only APPLIES the already-
+# fitted models loaded above, it never fits anything itself.
 predict_rf_prob <- function(rf_model, newdata) {
   as.numeric(predict(rf_model, data = newdata)$predictions[, "1"])
-}
-
-fit_isotonic_calibration <- function(oob_probs, observed_labels) {
-  ord <- order(oob_probs)
-  iso <- isoreg(x = oob_probs[ord], y = as.numeric(observed_labels[ord]))
-  list(x = oob_probs[ord], y = iso$yf)
 }
 
 calibrate_isotonic <- function(iso_cal, new_probs) {
@@ -161,64 +168,12 @@ calibrate_isotonic <- function(iso_cal, new_probs) {
                    method = "linear", rule = 2, ties = "ordered")$y, 0), 1)
 }
 
-fit_rf_magnitude_model <- function(training_data, state_name, predictors) {
-  training_data <- training_data %>%
-    mutate(log_abs_flux = log(pmax(abs(monthly_flux_gC_m2_month), 1e-6)))
-  list(
-    model  = ranger(reformulate(predictors, "log_abs_flux"),
-                    data = training_data, num.trees = n_trees,
-                    importance = "impurity", seed = rf_seed),
-    engine = "ranger_log_abs",
-    state  = state_name
-  )
-}
-
 predict_rf_magnitude <- function(fit, newdata) {
   mag <- exp(predict(fit$model, data = newdata)$predictions)
   if (identical(fit$state, "Weak-sink")) -mag else mag
 }
 
-summarise_magnitude_fit <- function(training_data, fit) {
-  fitted <- predict_rf_magnitude(fit, training_data)
-  tibble(
-    magnitude_model               = fit$state,
-    engine                        = fit$engine,
-    n_observations                = nrow(training_data),
-    mean_observed_flux            = mean(training_data$monthly_flux_gC_m2_month, na.rm = TRUE),
-    mean_fitted_flux              = mean(fitted, na.rm = TRUE),
-    rmse_gC_m2_month              = sqrt(mean((training_data$monthly_flux_gC_m2_month - fitted)^2, na.rm = TRUE)),
-    mae_gC_m2_month               = mean(abs(training_data$monthly_flux_gC_m2_month - fitted), na.rm = TRUE),
-    correlation_observed_fitted   = suppressWarnings(
-      cor(training_data$monthly_flux_gC_m2_month, fitted, use = "complete.obs"))
-  )
-}
-
-classification_skill <- function(prob, observed, threshold, model_label, eval_basis,
-                                 oob_error = NA_real_) {
-  pred_class <- as.integer(prob >= threshold)
-  tibble(
-    model              = model_label,
-    evaluation_basis   = eval_basis,
-    n_site_months      = length(observed),
-    n_sink_months      = sum(observed == 0),
-    n_source_months    = sum(observed == 1),
-    source_fraction    = mean(observed),
-    auc                = auc_rank(observed, prob),
-    brier_score        = mean((observed - prob)^2),
-    brier_null         = mean(observed) * (1 - mean(observed)),
-    brier_skill_score  = 1 - mean((observed - prob)^2) / (mean(observed) * (1 - mean(observed))),
-    tjur_r2            = mean(prob[observed == 1]) - mean(prob[observed == 0]),
-    ranger_oob_error   = oob_error,
-    threshold          = threshold,
-    accuracy           = mean(pred_class == observed),
-    sensitivity_source = sum(pred_class == 1 & observed == 1) / sum(observed == 1),
-    specificity_sink   = sum(pred_class == 0 & observed == 0) / sum(observed == 0),
-    precision_source   = sum(pred_class == 1 & observed == 1) / max(sum(pred_class == 1), 1),
-    predicted_source_fraction = mean(pred_class == 1)
-  )
-}
-
-# ── Spatial data infrastructure (identical to GLM script) ─────────────────────
+# ── Spatial data infrastructure ────────────────────────────────────────────────
 
 ecoregion_files <- unzip_if_needed(ecoregions_zip,
   file.path(data_dir, "ecoregions2017"), "Ecoregions2017\\.shp$")
@@ -276,6 +231,11 @@ if (use_era5_land) {
   map <- sum(prec, na.rm = TRUE);  names(map) <- "MAP"
 }
 
+# Cache the MAT/MAP climatology so downstream scripts (e.g. the NEON
+# representativeness supplement) don't have to re-read all 26 years of
+# ERA5-Land/WorldClim files just to reproduce these two static rasters.
+writeRaster(c(mat, map), file.path(output_dir, "mat_map_climatology.tif"), overwrite = TRUE)
+
 cell_area_mha <- cellSize(template, unit = "m") / 1e10
 names(cell_area_mha) <- "area_mha"
 
@@ -324,159 +284,8 @@ get_inundation_fraction <- function(year, month) {
   names(r) <- "inundation_fraction"; r
 }
 
-# ── Load and prepare training data ────────────────────────────────────────────
-
-site_behavior <- read.csv(site_behavior_file) %>%
-  mutate(SITE_ID = as.character(SITE_ID))
-
-upland_sites <- site_behavior %>%
-  filter(!is.na(EcoType),
-    !str_detect(EcoType, regex("wetland|inundat|flood|marsh|swamp|bog|fen|lake|rice",
-                               ignore_case = TRUE))) %>%
-  distinct(SITE_ID, EcoType, MAP, MAT)
-
-era5_30min <- data.table::fread(era5_30min_file) %>% as_tibble() %>%
-  mutate(across(c(SITE_ID), as.character),
-         across(c(Year, month), as.integer),
-         across(c(ERA5_Tair_C, ERA5_VSWC, gapfilled_CH4_mgC_30min), as.numeric)) %>%
-  inner_join(upland_sites %>% select(SITE_ID, EcoType), by = c("SITE_ID","EcoType")) %>%
-  filter(is.finite(Year), is.finite(month), is.finite(ERA5_Tair_C), is.finite(ERA5_VSWC))
-
-monthly_training <- era5_30min %>%
-  reframe(.by = c(SITE_ID, EcoType, Year, month),
-    monthly_budget_mgC_m2  = sum(gapfilled_CH4_mgC_30min, na.rm = TRUE),
-    mean_ERA5_Tair_C        = mean(ERA5_Tair_C, na.rm = TRUE),
-    mean_ERA5_VSWC          = mean(ERA5_VSWC,   na.rm = TRUE)) %>%
-  left_join(upland_sites, by = c("SITE_ID","EcoType")) %>%
-  mutate(
-    EcoType                  = factor(EcoType, levels = c("Forest","Grassland","Shrubland")),
-    weak_source              = as.integer(monthly_budget_mgC_m2 > 0),
-    monthly_flux_gC_m2_month = monthly_budget_mgC_m2 / 1000,
-    MAP                      = as.numeric(MAP),
-    MAT                      = as.numeric(MAT),
-    aridity_index            = MAP / (MAT + 10),
-    is_arid                  = as.integer(!is.na(aridity_index) & aridity_index < arid_ai_threshold)
-  ) %>%
-  filter(is.finite(weak_source), is.finite(mean_ERA5_Tair_C), is.finite(mean_ERA5_VSWC),
-         is.finite(MAP), is.finite(MAT), is.finite(aridity_index))
-
-class_predictors <- c("EcoType","mean_ERA5_Tair_C","mean_ERA5_VSWC","MAP","MAT","aridity_index")
-
-# ── Stage 1: Balanced RF (1:1 source:sink) ────────────────────────────────────
-# Downsample source months to match the number of sink months so both classes
-# have exactly equal representation in training. No case weights needed.
-# OOB predictions are used for honest evaluation and isotonic calibration.
-
-set.seed(rf_seed)
-sink_idx   <- which(monthly_training$weak_source == 0)
-source_idx <- which(monthly_training$weak_source == 1)
-bal_idx    <- c(sink_idx, sample(source_idx, length(sink_idx)))
-balanced_training <- monthly_training[bal_idx, ]
-
-message(sprintf("Stage 1 balanced training: %d sink + %d source = %d total (from %d)",
-  length(sink_idx), length(sink_idx), 2 * length(sink_idx), nrow(monthly_training)))
-
-message("Fitting Stage 1 balanced RF...")
-rf_model_A <- fit_rf_prob_model(balanced_training, class_predictors, use_case_weights = FALSE)
-
-oob_prob_A  <- rf_model_A$predictions[, "1"]
-iso_cal_A   <- fit_isotonic_calibration(oob_prob_A, balanced_training$weak_source)
-
-balanced_training <- balanced_training %>%
-  mutate(
-    source_prob_A_oob = oob_prob_A,
-    source_prob_A_raw = predict_rf_prob(rf_model_A, balanced_training),
-    source_prob_A     = calibrate_isotonic(iso_cal_A, source_prob_A_oob)
-  )
-
-# Also add calibrated projections back to full training for Stage 2 (source_probability predictor)
-monthly_training <- monthly_training %>%
-  mutate(
-    source_prob_A_raw = predict_rf_prob(rf_model_A, monthly_training),
-    source_prob_A     = calibrate_isotonic(iso_cal_A, source_prob_A_raw)
-  )
-
-skill_A <- classification_skill(
-  prob        = balanced_training$source_prob_A,
-  observed    = balanced_training$weak_source,
-  threshold   = binary_threshold,
-  model_label = "Continuous",
-  eval_basis  = "OOB + isotonic calibration (1:1 balanced)",
-  oob_error   = rf_model_A$prediction.error
-)
-
-cal_skill_A <- balanced_training %>%
-  mutate(prob_bin = ntile(source_prob_A_oob, 10)) %>%
-  group_by(prob_bin) %>%
-  summarise(
-    n                         = n(),
-    mean_oob_raw_prob         = mean(source_prob_A_oob, na.rm = TRUE),
-    mean_isotonic_cal_prob    = mean(source_prob_A,     na.rm = TRUE),
-    observed_source_fraction  = mean(weak_source,       na.rm = TRUE),
-    calibration_error         = mean_isotonic_cal_prob - observed_source_fraction,
-    .groups = "drop"
-  ) %>% mutate(model = "A")
-
-importance_A <- tibble(
-  predictor  = names(rf_model_A$variable.importance),
-  importance = rf_model_A$variable.importance,
-  model      = "P(source)"
-) %>% arrange(desc(importance))
-
-# ── Stage 2: RF magnitude models (shared across all approaches) ───────────────
-# Trained on the full weighted training data.
-# source_prob_A (calibrated OOB) used as the source_probability predictor
-# so it represents an honest, unbiased probability signal.
-
-magnitude_standardizers <- list(
-  Tair = make_standardizer(monthly_training$mean_ERA5_Tair_C),
-  VSWC = make_standardizer(monthly_training$mean_ERA5_VSWC),
-  MAP  = make_standardizer(monthly_training$MAP),
-  MAT  = make_standardizer(monthly_training$MAT)
-)
-
-monthly_training <- apply_standardizers(monthly_training, magnitude_standardizers) %>%
-  mutate(
-    source_probability = source_prob_A,   # Stage 2 uses Model A calibrated OOB probs
-    SITE_ID = factor(SITE_ID)
-  )
-
-mag_predictors <- c("z_Tair","z_VSWC","z_MAP","z_MAT","source_probability","is_arid","EcoType")
-
-sink_mag_data   <- monthly_training %>% filter(weak_source == 0, monthly_flux_gC_m2_month <= 0)
-source_mag_data <- monthly_training %>% filter(weak_source == 1, monthly_flux_gC_m2_month >  0)
-
-message("Fitting Stage 2 sink magnitude RF...")
-sink_mag_model   <- fit_rf_magnitude_model(sink_mag_data,   "Weak-sink",   mag_predictors)
-message("Fitting Stage 2 source magnitude RF...")
-source_mag_model <- fit_rf_magnitude_model(source_mag_data, "Weak-source", mag_predictors)
-
-magnitude_model_skill <- bind_rows(
-  summarise_magnitude_fit(sink_mag_data,   sink_mag_model),
-  summarise_magnitude_fit(source_mag_data, source_mag_model)
-)
-
-magnitude_fitted_values <- bind_rows(
-  sink_mag_data %>%
-    mutate(magnitude_model = "Weak-sink",
-           fitted_flux = pmin(predict_rf_magnitude(sink_mag_model, sink_mag_data), 0)),
-  source_mag_data %>%
-    mutate(magnitude_model = "Weak-source",
-           fitted_flux = pmax(predict_rf_magnitude(source_mag_model, source_mag_data), 0))
-) %>% rename(fitted_flux_gC_m2_month = fitted_flux)
-
-importance_mag <- bind_rows(
-  tibble(predictor = names(sink_mag_model$model$variable.importance),
-         importance = sink_mag_model$model$variable.importance,   model = "Stage 2 — Weak-sink"),
-  tibble(predictor = names(source_mag_model$model$variable.importance),
-         importance = source_mag_model$model$variable.importance, model = "Stage 2 — Weak-source")
-) %>% arrange(model, desc(importance))
-
-training_vswc_range <- range(monthly_training$mean_ERA5_VSWC, na.rm = TRUE)
-training_prec_range <- quantile(monthly_training$MAP / 12, probs = c(0.02, 0.98), na.rm = TRUE)
-
 # ── Spatial projection loop ───────────────────────────────────────────────────
-# Both Stage 1 models predict in the same pass.
+# Both Stage 1/Stage 2 models predict in the same pass.
 # Stores per cell: source_prob_A, sink_flux, source_flux, area.
 
 message("Starting spatial loop (", length(years_to_process), " years × 12 months)...")
@@ -513,28 +322,50 @@ for (year in years_to_process) {
         inundation_fraction  = pmin(pmax(inundation_fraction, 0), 1),
         upland_area_fraction = 1 - inundation_fraction,
         area_mha             = area_mha * upland_area_fraction,
-        is_arid              = as.integer(EcoType == "Arid"),
-        EcoType              = factor(if_else(EcoType == "Arid","Shrubland", EcoType),
-                                      levels = levels(monthly_training$EcoType)),
         mean_ERA5_Tair_C = tavg,
         mean_ERA5_VSWC   = if (use_era5_land) vswc else
           scales::rescale(pmin(pmax(prec, training_prec_range[1]), training_prec_range[2]),
                           to = training_vswc_range, from = training_prec_range),
-        aridity_index = MAP / (MAT + 10)
+        # See aridity_mat_floor (loaded from model_bundle above).
+        aridity_index = if_else(MAT > aridity_mat_floor, MAP / (MAT + 10), NA_real_),
+        # Classified the SAME way 12_SourceProp_MagnitudeModels.R classified
+        # training data: aridity_index < arid_ai_threshold, not the
+        # biome/MODIS raster's own "Arid" class from ecotype_lookup/eco_r
+        # (checked here via the pre-remap EcoType, right before it's
+        # overwritten below). A biome-classified desert cell that does NOT
+        # cross the aridity_index threshold folds into Shrubland (the
+        # raster's next-best guess); any cell that DOES cross the threshold
+        # becomes "Arid" and is handled by the models' own trained Arid
+        # behavior (see below), not a hard override.
+        is_arid = as.integer(!is.na(aridity_index) & aridity_index < arid_ai_threshold),
+        EcoType = factor(if_else(is_arid == 1, "Arid",
+                                 if_else(EcoType == "Arid", "Shrubland", as.character(EcoType))),
+                         levels = ecotype_levels)
       ) %>%
       filter(area_mha > 0, is.finite(aridity_index))
 
     dat <- apply_standardizers(dat, magnitude_standardizers)
 
-    # ── Stage 1: predict Model A; arid cells forced to 0 ─────────────────────
-    not_arid <- !(!is.na(dat$is_arid) & dat$is_arid == 1)
-
-    dat$source_prob_A_raw <- 0; dat$source_prob_A <- 0
-    if (any(not_arid)) {
-      nd <- dat[not_arid, ]
-      dat$source_prob_A_raw[not_arid] <- predict_rf_prob(rf_model_A, nd)
-      dat$source_prob_A[not_arid]     <- calibrate_isotonic(iso_cal_A, dat$source_prob_A_raw[not_arid])
-    }
+    # ── Stage 1: predict Model A ──────────────────────────────────────────────
+    # Arid cells ARE hard-forced to P(source) = 0. rf_model_A never trained
+    # on Arid data at all (12_SourceProp_MagnitudeModels.R excludes it from
+    # Stage 1 entirely), because the only 2 NEON sites crossing the
+    # aridity_index threshold (JORN, SRER) are empirically 100% weak-source
+    # -- the opposite of the standard "arid soils are net CH4 sinks" prior --
+    # so there's no trustworthy basis for a learned Arid P(source). Rather
+    # than let rf_model_A extrapolate onto a level it never saw, Arid is
+    # routed deterministically to the sink magnitude model instead, which
+    # itself excludes Arid's own site-months and predicts Arid cells by
+    # extrapolating from Forest/Grassland/Shrubland sink behavior via the
+    # shared continuous covariates. source_mag_model is still evaluated
+    # below (dat$predicted_source_flux) for every cell for code simplicity,
+    # but it's multiplied by source_prob_A = 0 for Arid cells in the
+    # Continuous approach below, and Approach 2's P >= binary_threshold
+    # dichotomous rule never fires for Arid either, so Arid never actually
+    # receives a source-model flux value in any approach.
+    dat$source_prob_A_raw <- predict_rf_prob(rf_model_A, dat)
+    dat$source_prob_A     <- if_else(dat$is_arid == 1, 0,
+                                     calibrate_isotonic(iso_cal_A, dat$source_prob_A_raw))
 
     # Stage 2 uses Model A probability as predictor
     dat <- dat %>% mutate(source_probability = source_prob_A)
@@ -568,8 +399,8 @@ cell_preds <- cell_preds %>%
   )
 
 # ── Approach 3: All-Sink (theoretical maximum sink) ───────────────────────────
-# Every non-arid upland cell is assigned the sink magnitude flux, regardless of
-# P(source). This is the most extreme possible sink estimate from the model.
+# Every cell is assigned the sink magnitude flux, regardless of P(source).
+# This is the most extreme possible sink estimate from the model.
 
 cell_preds <- cell_preds %>%
   mutate(
@@ -630,21 +461,6 @@ budget_summary <- annual_budget_long %>%
     .groups = "drop"
   )
 
-# ── Classification skill comparison table ─────────────────────────────────────
-
-comparison_class <- skill_A %>%
-  select(model, evaluation_basis, auc, brier_score, brier_null, brier_skill_score,
-         tjur_r2, ranger_oob_error, threshold, accuracy,
-         sensitivity = sensitivity_source, specificity = specificity_sink)
-
-# ── Magnitude skill comparison ────────────────────────────────────────────────
-
-comparison_magnitude <- magnitude_model_skill %>%
-  select(magnitude_model, rmse_gC_m2_month, mae_gC_m2_month, correlation_observed_fitted) %>%
-  mutate(approach = "RF/ranger", .before = 1)
-
-# ── Budget comparison ─────────────────────────────────────────────────────────
-
 comparison_budget <- budget_summary
 
 # ── Write outputs ─────────────────────────────────────────────────────────────
@@ -652,30 +468,15 @@ comparison_budget <- budget_summary
 write.csv(annual_budget,          file.path(output_dir, "annual_budget_three_approaches.csv"),    row.names = FALSE)
 write.csv(annual_budget_long,     file.path(output_dir, "annual_budget_long.csv"),                row.names = FALSE)
 write.csv(budget_summary,         file.path(output_dir, "budget_summary_three_approaches.csv"),   row.names = FALSE)
-write.csv(comparison_class,       file.path(output_dir, "comparison_class_skill_GLM_vs_RF.csv"),  row.names = FALSE)
-write.csv(comparison_magnitude,   file.path(output_dir, "comparison_magnitude_skill_GLM_vs_RF.csv"), row.names = FALSE)
 write.csv(comparison_budget,      file.path(output_dir, "comparison_budget_all_approaches.csv"),  row.names = FALSE)
-write.csv(cal_skill_A,            file.path(output_dir, "probability_calibration_skill.csv"),     row.names = FALSE)
-write.csv(importance_A,           file.path(output_dir, "rf_class_variable_importance.csv"),      row.names = FALSE)
-write.csv(importance_mag,         file.path(output_dir, "rf_magnitude_variable_importance.csv"),  row.names = FALSE)
-write.csv(magnitude_model_skill,  file.path(output_dir, "magnitude_model_skill.csv"),             row.names = FALSE)
-write.csv(magnitude_fitted_values,file.path(output_dir, "magnitude_model_fitted_values.csv"),     row.names = FALSE)
 write.csv(gmb_sensitivity,        file.path(output_dir, "gmb_threshold_sensitivity.csv"),         row.names = FALSE)
 write.csv(data.frame(
   P_star                   = P_star_nearest,   # nearest threshold to GMB target; budget floor never reached
   budget_floor_tg_ch4_yr  = budget_floor,
   binary_threshold         = binary_threshold,
   gmb_target_tg_ch4_yr    = gmb_soil_sink_tg_ch4_yr,
-  n_trees                  = n_trees,
-  rf_min_node_size         = rf_min_node_size,
-  rf_max_depth             = rf_max_depth,
-  rf_sample_frac           = rf_sample_frac,
-  rf_seed                  = rf_seed,
-  calibration_method       = "isotonic_regression_on_OOB",
-  stage1_training          = sprintf("1:1 balanced (n=%d sink + %d source = %d total; from %d)",
-                               length(sink_idx), length(sink_idx),
-                               2 * length(sink_idx), nrow(monthly_training))
-), file.path(output_dir, "model_parameters.csv"), row.names = FALSE)
+  model_bundle_source       = model_bundle_file
+), file.path(output_dir, "spatial_projection_parameters.csv"), row.names = FALSE)
 
 saveRDS(cell_preds, file.path(output_dir, "monthly_cell_predictions_2000_2025.rds"))
 terra::writeRaster(template, file.path(output_dir, "era5_template.tif"), overwrite = TRUE)
@@ -683,33 +484,19 @@ terra::writeRaster(template, file.path(output_dir, "era5_template.tif"), overwri
 # ── Summary text ──────────────────────────────────────────────────────────────
 
 capture.output({
-  cat("RF upscaling — three-approach comparison\n\n")
-  cat(sprintf("Stage 1: weighted RF | n=%d | n_trees=%d | min.node.size=%d | max.depth=%d | sample.frac=%.1f\n",
-    nrow(monthly_training), n_trees, rf_min_node_size, rf_max_depth, rf_sample_frac))
-  cat("Calibration: isotonic regression on OOB predictions\n")
+  cat("RF spatial upscaling — three-approach comparison\n\n")
+  cat("Models loaded from: ", model_bundle_file, "\n\n", sep = "")
   cat("Approach 1 — Continuous: P(source)-weighted flux blend (no hard threshold)\n")
   cat(sprintf("Approach 2 — Dichotomous: hard threshold at P(source) >= %.2f\n", binary_threshold))
-  cat(sprintf("Approach 3 — All-Sink: all non-arid cells assigned sink flux (theoretical maximum sink)\n"))
+  cat(sprintf("Approach 3 — All-Sink: all cells assigned sink flux (theoretical maximum sink)\n"))
   cat(sprintf("  GMB sensitivity floor: %.1f Tg/yr at P* = %.2f; GMB target (%.0f) never reached\n\n",
     budget_floor, P_star_nearest, gmb_soil_sink_tg_ch4_yr))
 
-  cat("─── Stage 1 Classification Skill ───\n")
-  print(comparison_class)
-
-  cat("\n─── Stage 2 Magnitude Skill ───\n")
-  print(comparison_magnitude)
-
-  cat("\n─── Annual Budget Summary — Three Approaches ───\n")
+  cat("─── Annual Budget Summary — Three Approaches ───\n")
   print(budget_summary)
 
-  cat("\n─── Full Budget Comparison (incl. GLM) ───\n")
+  cat("\n─── Full Budget Comparison ───\n")
   print(comparison_budget)
-
-  cat("\n─── Calibration (OOB deciles) ───\n"); print(cal_skill_A)
-
-  cat("\n─── Stage 1 Variable Importance ───\n")
-  print(importance_A)
-  cat("\n─── Stage 2 Variable Importance ───\n"); print(importance_mag)
 }, file = file.path(output_dir, "spatial_trial_summary_RF.txt"))
 
 # ── Figures ───────────────────────────────────────────────────────────────────
@@ -725,9 +512,6 @@ approach_colors <- c(
   "GMB-Dichotomous" = "#E91E63"   # material pink
 )
 gmb_line_color <- "#2166AC"
-
-ecotype_colors <- c(Forest = "#1B7837", Grassland = "#D9B86C",
-                    Shrubland = "#C2A5CF", Arid = "#D95F02")
 
 # Fig 1: Annual budget time series — three RF approaches
 p1 <- annual_budget_long %>%
@@ -768,30 +552,6 @@ p2 <- comparison_budget %>%
 ggsave(file.path(figure_dir, "Fig2_budget_bar.png"),
   p2, width = 8, height = 4, units = "in", dpi = 300, bg = "white")
 
-# Fig 3: Classification skill comparison (AUC, Tjur R², sensitivity, specificity)
-p3 <- comparison_class %>%
-  filter(!is.na(auc)) %>%
-  pivot_longer(c(auc, tjur_r2, accuracy, sensitivity, specificity),
-               names_to = "metric", values_to = "value") %>%
-  filter(!is.na(value)) %>%
-  mutate(metric = factor(metric,
-    levels = c("auc","tjur_r2","accuracy","sensitivity","specificity"),
-    labels = c("AUC","Tjur R²","Accuracy","Sensitivity","Specificity")),
-    model_short = model) %>%
-  ggplot(aes(x = value, y = metric, fill = model_short)) +
-  geom_col(position = position_dodge(0.7), width = 0.6, alpha = 0.85) +
-  scale_x_continuous(limits = c(0, 1.05), expand = c(0, 0)) +
-  scale_fill_manual(values = c(
-    "Continuous"  = "#009688",
-    "Dichotomous" = "#9C27B0"
-  )) +
-  labs(title = "Stage 1 Classification Skill",
-       x = "Value", y = NULL, fill = NULL) +
-  fig_theme + theme(legend.position = "top")
-
-ggsave(file.path(figure_dir, "Fig3_classification_skill.png"),
-  p3, width = 7, height = 4.5, units = "in", dpi = 300, bg = "white")
-
 # Fig 4: GMB threshold sensitivity curve with P* marked
 p4 <- gmb_sensitivity %>%
   ggplot(aes(x = threshold, y = mean_tg)) +
@@ -816,23 +576,4 @@ p4 <- gmb_sensitivity %>%
 ggsave(file.path(figure_dir, "Fig4_gmb_threshold_sensitivity.png"),
   p4, width = 7, height = 4, units = "in", dpi = 300, bg = "white")
 
-# Fig 5: Magnitude model — observed vs fitted
-make_mag_plot <- function(model_label, tag) {
-  magnitude_fitted_values %>%
-    filter(magnitude_model == model_label, !is.na(EcoType)) %>%
-    ggplot(aes(x = monthly_flux_gC_m2_month, y = fitted_flux_gC_m2_month, color = EcoType)) +
-    geom_hline(yintercept = 0, color = "grey70", linewidth = 0.3) +
-    geom_vline(xintercept = 0, color = "grey70", linewidth = 0.3) +
-    geom_abline(slope = 1, intercept = 0, color = "grey35", linetype = "dashed", linewidth = 0.5) +
-    geom_point(alpha = 0.5, size = 1.5) +
-    scale_color_manual(values = ecotype_colors) +
-    labs(title = paste0(tag, ". ", model_label), color = NULL,
-         x = "Observed (g C m⁻² mo⁻¹)", y = "Fitted (g C m⁻² mo⁻¹)") +
-    fig_theme
-}
-fig5 <- plot_grid(make_mag_plot("Weak-sink","A"), make_mag_plot("Weak-source","B"), ncol = 2)
-ggsave(file.path(figure_dir, "Fig5_magnitude_models.png"),
-  fig5, width = 9, height = 4.5, units = "in", dpi = 300, bg = "white")
-
-message("Three-approach RF upscaling complete. Outputs in: ", rf_dir)
-
+message("Three-approach RF spatial upscaling complete. Outputs in: ", rf_dir)

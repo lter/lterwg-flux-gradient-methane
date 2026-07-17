@@ -310,18 +310,28 @@ classify_smud_behavior <- function(flux_daily) {
   )
 }
 
+# Returns a list-column: one character vector of applicable ecosystem_group
+# categories per input row. Most SMUD ecosystem labels map to exactly one
+# category; Tundra is duplicated into both Shrubland and Grassland/Savanna
+# (same policy as assign_reference_ecosystem_groups() below, and the same
+# choice confirmed for the literature reference data), so each individual
+# SMUD tundra measurement contributes to both panels' medians rather than
+# being forced into a single "best guess" bucket.
 map_smud_ecosystem <- function(ecosystem) {
-  case_when(
-    ecosystem %in% c("Forest", "Rainforest", "Woodland") ~ "Forest",
-    ecosystem %in% c("Grassland", "Savanna")             ~ "Grassland/Savanna",
-    ecosystem %in% c("Shrub", "Shrubland")               ~ "Shrubland",
-    ecosystem == "Agriculture"                            ~ "Cropland",
-    ecosystem == "Tundra"                                 ~ "Tundra",
-    ecosystem %in% c("Desert", "Bare")                   ~ "Upland/Desert",
-    ecosystem == "Wetland"                                ~ "Wetland",
-    ecosystem == "Urban"                                  ~ "Urban",
-    TRUE                                                  ~ "Other"
-  )
+  purrr::map(ecosystem, function(e) {
+    cat <- dplyr::case_when(
+      e %in% c("Forest", "Rainforest", "Woodland") ~ "Forest",
+      e %in% c("Grassland", "Savanna")             ~ "Grassland/Savanna",
+      e %in% c("Shrub", "Shrubland")                ~ "Shrubland",
+      e == "Agriculture"                             ~ "Cropland",
+      e == "Tundra"                                  ~ "MULTI_TUNDRA",
+      e %in% c("Desert", "Bare")                     ~ "Arid",
+      e == "Wetland"                                  ~ "Wetland/Lake",
+      e == "Urban"                                    ~ "Urban",
+      TRUE                                             ~ "Other"
+    )
+    if (identical(cat, "MULTI_TUNDRA")) c("Shrubland", "Grassland/Savanna") else cat
+  })
 }
 
 smud_file <- file.path(localdir.smud, "Studies_and_Fluxes_cleaned.xlsx")
@@ -339,6 +349,7 @@ smud_raw <- if (file.exists(smud_file)) {
       is_ec           = str_detect(coalesce(Flux_method, ""), "Eddy covariance"),
       study_id        = paste0(Paper_author, " ", Paper_year)
     ) %>%
+    tidyr::unnest_longer(ecosystem_group) %>%
     filter(ecosystem_group != "Other")
 } else {
   warning("SMUD file not found: ", smud_file, ". SMUD data will not be included.")
@@ -475,31 +486,107 @@ draft_candidate_extracted_info <- tribble(
   "Smith et al. 2000", "Source identified; numeric rate still needs full text/table", FALSE, "Northern European soils", "Northern Europe", "Soil methane oxidation synthesis/comparison", "Range and statistical distribution of oxidation rates reported, but numeric summary not exposed in accessible abstract", NA_character_, NA_real_, NA_real_, NA_real_, NA_character_, "Smith, K. A., Dobbie, K. E., Ball, B. C., Bakken, L. R., Sitaula, B. K., Hansen, S., et al. (2000). Oxidation of atmospheric methane in Northern European soils, comparison with other ecosystems, and uncertainties in the global terrestrial sink. Global Change Biology, 6, 791-803. https://doi.org/10.1046/j.1365-2486.2000.00356.x", "The earlier related Ball et al. 1997 paper reports CH4 oxidation rates from 0 to 2.5 mg m-2 d-1, but that value was not assigned to Smith et al. 2000 without full-text confirmation."
 )
 
-assign_reference_ecosystem <- function(ecosystem_class) {
-  case_when(
-    str_detect(ecosystem_class, regex("marsh|fen|swamp|bog|mire|wetland|mangrove", ignore_case = TRUE)) ~ "Wetland",
-    str_detect(ecosystem_class, regex("lake", ignore_case = TRUE)) ~ "Lake",
-    str_detect(ecosystem_class, regex("rice|cropland", ignore_case = TRUE)) ~ "Cropland",
-    str_detect(ecosystem_class, regex("forest|black spruce", ignore_case = TRUE)) ~ "Forest",
-    str_detect(ecosystem_class, regex("^upland$|^drained$|desert|rock|ice", ignore_case = TRUE)) ~ "Upland/Desert",
-    str_detect(ecosystem_class, regex("shrubland", ignore_case = TRUE)) ~ "Shrubland",
-    str_detect(ecosystem_class, regex("grassland|steppe|savanna", ignore_case = TRUE)) ~ "Grassland/Savanna",
-    str_detect(ecosystem_class, regex("tundra", ignore_case = TRUE)) ~ "Tundra",
-    str_detect(ecosystem_class, regex("urban", ignore_case = TRUE)) ~ "Urban",
-    TRUE ~ "Other"
+# Returns a list-column: one character vector of applicable ecosystem_group
+# categories per input ecosystem_class string. Most reference classes map to
+# exactly one category; a few composite/ambiguous classes are duplicated
+# across every category their site composition actually spans, so a single
+# published/measured flux estimate contributes to each relevant panel rather
+# than being forced into one "best guess" bucket:
+#  - "Upland" (Delwiche et al. 2021 FLUXNET-CH4 aggregate, n=15 sites: 6
+#    needleleaf + 1 mixed forest, 2 alpine meadow + 1 grassland + 1 tundra,
+#    3 cropland, 1 urban) -> Forest, Grassland/Savanna, Cropland, Urban.
+#  - "Drained" (Delwiche et al. 2021 aggregate, n=7: former wetlands now used
+#    as grassland n=3 or cropland n=3) -> Grassland/Savanna, Cropland.
+#  - Any "tundra" class -> Shrubland, Grassland/Savanna.
+assign_reference_ecosystem_groups <- function(ecosystem_class) {
+  purrr::map(ecosystem_class, function(ec) {
+    if (is.na(ec)) return(NA_character_)
+    if (str_detect(ec, regex("^upland$", ignore_case = TRUE))) {
+      return(c("Forest", "Grassland/Savanna", "Cropland", "Urban"))
+    }
+    if (str_detect(ec, regex("^drained$", ignore_case = TRUE))) {
+      return(c("Grassland/Savanna", "Cropland"))
+    }
+    if (str_detect(ec, regex("tundra", ignore_case = TRUE))) {
+      return(c("Shrubland", "Grassland/Savanna"))
+    }
+    if (str_detect(ec, regex("marsh|fen|swamp|bog|mire|wetland|mangrove|lake", ignore_case = TRUE))) {
+      return("Wetland/Lake")
+    }
+    if (str_detect(ec, regex("rice|cropland", ignore_case = TRUE))) return("Cropland")
+    if (str_detect(ec, regex("forest|black spruce", ignore_case = TRUE))) return("Forest")
+    if (str_detect(ec, regex("desert|rock|ice", ignore_case = TRUE))) return("Arid")
+    if (str_detect(ec, regex("shrubland", ignore_case = TRUE))) return("Shrubland")
+    if (str_detect(ec, regex("grassland|steppe|savanna", ignore_case = TRUE))) return("Grassland/Savanna")
+    if (str_detect(ec, regex("urban", ignore_case = TRUE))) return("Urban")
+    "Other"
+  })
+}
+
+# Condensed to align with the categories used in the RF upscaling model
+# (12_SourceProp_MagnitudeModels.R / 13_Global_SpatialUpscalingRF.R: Forest,
+# Grassland, Shrubland, plus "Arid" as an aridity_index-based split of
+# Shrubland — see assign_neon_ecosystem() below). Wetland and Lake are
+# merged (both are inundated/aquatic CH4 sources); Urban, Wetland/Lake, and
+# Cropland are kept as additional comparison-only categories not used in
+# the upscaling itself.
+ecosystem_levels <- c(
+  "Urban", "Wetland/Lake", "Cropland", "Forest", "Shrubland", "Grassland/Savanna", "Arid"
+)
+
+# "All ecosystems" is a summary facet appended after the 7 real categories --
+# with facet_wrap(ncol = 3) that's 8 panels in a 3x3 grid, using the one
+# empty grid slot left over. It is NOT used for per-record ecosystem
+# assignment (assign_reference_ecosystem_groups(), assign_neon_ecosystem(),
+# upland_eco_groups all ignore it) -- it's added only when building
+# bar_source_data for comparison_figure, as a deduplicated pooled copy of
+# every other panel's data. Keeping it as the last level of ecosystem_levels
+# means it's automatically included wherever comparison_figure factors
+# ecosystem_group by that vector, without affecting any other dataset.
+# "All Upland" is a second summary facet, pooling just the non-inundated
+# categories (everything except Wetland/Lake) -- same idea as the density
+# plot's "upland" pooling below, but broken out by data source instead of by
+# tower vs. chamber. With this and "All ecosystems" added, the 7 real
+# categories + 2 summaries = 9 panels, filling the 3x3 grid exactly.
+ecosystem_levels <- c(ecosystem_levels, "All ecosystems", "All Upland")
+
+# Upland (non-inundated) ecosystem groups — excludes Wetland/Lake. Used both
+# for the "All Upland" summary facet in comparison_figure and for the
+# tower-vs-chamber density plot below.
+upland_eco_groups <- c("Urban", "Cropland", "Forest", "Shrubland",
+                       "Grassland/Savanna", "Arid")
+
+# Checks whether ANY of a reference class's applicable categories (see
+# assign_reference_ecosystem_groups()) falls in upland_eco_groups -- used for
+# pooled "is this upland at all" filters that don't need a per-category
+# facet split (the density plot, and the "All Upland" summary facet below).
+is_any_upland <- function(ecosystem_class) {
+  purrr::map_lgl(
+    assign_reference_ecosystem_groups(ecosystem_class),
+    function(cats) any(cats %in% upland_eco_groups, na.rm = TRUE)
   )
 }
 
-ecosystem_levels <- c(
-  "Urban", "Lake", "Wetland", "Cropland", "Forest", "Shrubland",
-  "Grassland/Savanna", "Tundra", "Upland/Desert"
-)
+# Same aridity_index definition used throughout the RF pipeline
+# (12_SourceProp_MagnitudeModels.R, 13_Global_SpatialUpscalingRF.R,
+# 19_Supp_NEONRepresentativeness.R): aridity_index = MAP / (MAT + 10), with
+# a floor on MAT to avoid the formula blowing up as MAT+10 -> 0. No NEON
+# site is literally labeled "Arid" in site metadata (see the note by
+# assign_neon_ecosystem() below) -- this is what identifies the ~2 sites
+# (JORN, SRER; both raw EcoType "Shrubland") that should be shown under the
+# Arid comparison panel instead.
+arid_ai_threshold <- 15
+aridity_mat_floor <- -9  # deg C; see 12_SourceProp_MagnitudeModels.R for rationale
 
 site_behavior <- read.csv(site_behavior_file) %>%
   mutate(
     SITE_ID = as.character(SITE_ID),
     CH4_behavior = factor(CH4_behavior, levels = behavior_levels),
-    CH4_gradient_behavior = factor(CH4_gradient_behavior, levels = behavior_levels)
+    CH4_gradient_behavior = factor(CH4_gradient_behavior, levels = behavior_levels),
+    MAP = as.numeric(MAP),
+    MAT = as.numeric(MAT),
+    aridity_index = if_else(MAT > aridity_mat_floor, MAP / (MAT + 10), NA_real_),
+    is_arid = as.integer(!is.na(aridity_index) & aridity_index < arid_ai_threshold)
   )
 
 era5_annual_budget <- read.csv(era5_annual_budget_file) %>%
@@ -511,7 +598,7 @@ era5_annual_budget <- read.csv(era5_annual_budget_file) %>%
     model_only_daily_mgC_m2_day = model_only_annual_budget_gC_m2_yr * 1000 / 365
   ) %>%
   left_join(
-    site_behavior %>% dplyr::select(SITE_ID, CH4_behavior, CH4_gradient_behavior, EcoType),
+    site_behavior %>% dplyr::select(SITE_ID, CH4_behavior, CH4_gradient_behavior, EcoType, is_arid),
     by = "SITE_ID"
   ) %>%
   filter(
@@ -525,9 +612,30 @@ era5_mean_annual_budget <- read.csv(era5_mean_annual_budget_file) %>%
     era5_annual_behavior = factor(era5_annual_behavior, levels = behavior_levels)
   )
 
-assign_neon_ecosystem <- function(ecotype) {
+# NEON's own EcoType field only ever takes: Cropland, Forest, Grassland,
+# Shrubland, Wetland (confirmed directly from OUTPUT/30min_site_behavior.csv)
+# -- no NEON site is literally "Tundra," "Desert," "Lake," or "Urban," so
+# this stays a simple scalar mapping (no multi-category duplication needed
+# here, unlike assign_reference_ecosystem_groups() for the literature/model
+# data). Desert/Bare and Wetland/Lake branches are kept for robustness in
+# case EcoType ever gains those values.
+#
+# is_arid (see site_behavior above) takes priority over the raw text label:
+# JORN and SRER are both raw EcoType "Shrubland" but cross the
+# aridity_index < arid_ai_threshold definition used throughout the RF
+# pipeline, so they're shown under the Arid panel here instead of
+# Shrubland -- the same reclassification 12_SourceProp_MagnitudeModels.R
+# applies for training. Empirically both sites are 100% observed
+# weak-source (see 12's header note), which is the whole reason this
+# comparison is worth showing: it lets the Arid panel visibly disagree with
+# the "arid soils are net CH4 sinks" prior instead of that disagreement
+# being invisible inside the Shrubland panel's pooled statistics.
+assign_neon_ecosystem <- function(ecotype, is_arid = 0L) {
   case_when(
+    is_arid == 1 ~ "Arid",
     ecotype == "Grassland" ~ "Grassland/Savanna",
+    ecotype == "Wetland" ~ "Wetland/Lake",
+    ecotype %in% c("Desert", "Bare") ~ "Arid",
     ecotype %in% ecosystem_levels ~ ecotype,
     TRUE ~ "Other"
   )
@@ -558,7 +666,7 @@ era5_site_summary <- era5_annual_budget %>%
     era5_annual_behavior = factor(era5_annual_behavior, levels = behavior_levels),
     gradient_behavior_for_plot = coalesce(era5_annual_behavior, CH4_gradient_behavior, CH4_behavior)
   ) %>%
-  group_by(SITE_ID, gradient_behavior_for_plot, CH4_gradient_behavior, CH4_behavior, EcoType) %>%
+  group_by(SITE_ID, gradient_behavior_for_plot, CH4_gradient_behavior, CH4_behavior, EcoType, is_arid) %>%
   summarise(
     n_years = n(),
     mean_observed_coverage = mean(observed_coverage, na.rm = TRUE),
@@ -574,7 +682,7 @@ era5_site_summary <- era5_annual_budget %>%
   ) %>%
   mutate(
     gradient_behavior_for_plot = factor(gradient_behavior_for_plot, levels = behavior_levels),
-    ecosystem_group = assign_neon_ecosystem(EcoType),
+    ecosystem_group = assign_neon_ecosystem(EcoType, is_arid),
     era5_gradient_class = recode(
       as.character(gradient_behavior_for_plot),
       "Weak-sink" = "NEON ERA5 gapfilled sink",
@@ -650,11 +758,19 @@ comparison_table <- bind_rows(
         "NEON ERA5 gapfilled gradient"
       )
     ),
-    ecosystem_group = case_when(
-      source_type == "NEON ERA5 gapfilled gradient" ~ "Across NEON sites",
-      TRUE ~ assign_reference_ecosystem(ecosystem_class)
+    # List-column: most rows get exactly one ecosystem_group, but composite
+    # reference classes (Upland, Drained, Tundra) get several -- see
+    # assign_reference_ecosystem_groups(). unnest_longer() below duplicates
+    # those rows' flux estimate into every applicable panel.
+    ecosystem_group = purrr::map2(
+      as.character(source_type), ecosystem_class,
+      function(st, ec) {
+        if (identical(st, "NEON ERA5 gapfilled gradient")) return("Across NEON sites")
+        assign_reference_ecosystem_groups(ec)[[1]]
+      }
     )
-  )
+  ) %>%
+  tidyr::unnest_longer(ecosystem_group)
 
 write.csv(comparison_table, "OUTPUT/CH4_flux_FLUXNET_NEON_comparison_values.csv", row.names = FALSE)
 write.csv(era5_annual_budget, "OUTPUT/NEON_ERA5_annual_gradient_flux_rates_for_FLUXNET_comparison.csv", row.names = FALSE)
@@ -798,14 +914,33 @@ source_label_levels <- c(
   "FLUXNET-CH4", "Chambers", "Process model", "Upland towers", "NEON ERA5"
 )
 
-source_offsets <- c(
-  "FLUXNET-CH4"   = 0,
-  "Chambers"      = 0,
-  "Process model" = 0,
-  "Upland towers" = 0,
-  "NEON ERA5"     = 0
+# Row shown within each ecosystem facet panel. Ecosystem is now handled by
+# facet_wrap(), so this only needs to separate sources vertically within a
+# panel. Condensed from the earlier 8-row layout: Validation towers are
+# folded into Upland towers (both are non-FLUXNET tower measurements), and
+# NEON's three state-class rows (Weak-sink/Fluctuating/Weak-source) collapse
+# into a single "NEON" row — sink vs. source is now shown by bar direction
+# and color rather than by row.
+source_row_levels <- c(
+  "FLUXNET-CH4", "Chambers", "Process model", "Upland towers", "NEON"
 )
 
+# Fixed, shared weak/strong magnitude threshold (±10 mg C m-2 d-1) used for
+# both sides, so the background shading is symmetric around zero. Replaces
+# the earlier data-driven threshold (median |flux| on the sink side, ≈0.62).
+# Note this fixed value still means most real NEON "weak-source" sites
+# (source magnitudes are ~20x larger than sink magnitudes) may fall into the
+# "strong-source" zone rather than "weak-source" — same tradeoff as before,
+# now with a round, easy-to-communicate cutoff.
+sink_threshold   <- 10
+source_threshold <- 10
+message(sprintf(
+  "Weak/strong threshold (fixed, shared): %.3f mg C m-2 d-1",
+  sink_threshold
+))
+
+# Individual literature/ecosystem-class estimates, one row per estimate. These
+# feed into the condensed per-source bar chart below (bar_source_data).
 reference_plot_data <- comparison_table %>%
   filter(source_type != "NEON ERA5 gapfilled gradient") %>%
   mutate(
@@ -819,24 +954,10 @@ reference_plot_data <- comparison_table %>%
       "SMUD tower (EC)"                      = "Upland towers"
     ),
     source_label = factor(source_label, levels = source_label_levels),
-    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
-    y_base = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
-    y_plot = y_base + source_offsets[source_label],
-    CH4_behavior = case_when(
-      daily_mgC_m2_day < 0 ~ "Weak-sink",
-      daily_mgC_m2_day > 0 ~ "Weak-source",
-      TRUE ~ "Fluctuating"
-    ),
-    CH4_behavior = factor(CH4_behavior, levels = behavior_levels)
+    source_row = factor(as.character(source_label), levels = source_row_levels),
+    ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels)
   ) %>%
-  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day)) %>%
-  reframe(
-    .by = c(ecosystem_group, source_label, CH4_behavior, y_base, y_plot),
-    n_estimates = dplyr::n(),
-    daily_mgC_m2_day = median(daily_mgC_m2_day, na.rm = TRUE),
-    daily_low_mgC_m2_day = min(daily_low_mgC_m2_day, na.rm = TRUE),
-    daily_high_mgC_m2_day = max(daily_high_mgC_m2_day, na.rm = TRUE)
-  )
+  filter(!is.na(source_row), !is.na(ecosystem_group), is.finite(daily_mgC_m2_day))
 
 # SMUD aggregated by ecosystem × behavior class (sink / source shown separately)
 smud_behavior_plot_data <- if (nrow(smud_raw) > 0) {
@@ -863,298 +984,199 @@ smud_behavior_plot_data <- if (nrow(smud_raw) > 0) {
   tibble()
 }
 
-ecosystem_axis <- tibble(
-  ecosystem_group = factor(ecosystem_levels, levels = ecosystem_levels),
-  y_base = length(ecosystem_levels) - seq_along(ecosystem_levels) + 1
-)
-
-# Validation towers (non-FLUXNET): one segment per directly-measured site only.
+# Validation towers (non-FLUXNET): one point per directly-measured site only.
 # additional_draft_tower_reference (US-Blo, SE-Nor, CA-Hal) is already aggregated
-# into the "Upland towers" symbol and should not appear here as well.
-validation_tower_line_data <- non_fluxnet_tower_reference %>%
-  dplyr::select(site_id, ecosystem_class, daily_mgC_m2_day, CH4_behavior) %>%
+# into the "Upland towers" symbol and should not appear here as well. These are
+# folded into the "Upland towers" row below (condensed row set) rather than
+# kept as a separate row.
+validation_tower_points <- non_fluxnet_tower_reference %>%
+  dplyr::select(site_id, ecosystem_class, daily_mgC_m2_day) %>%
   filter(is.finite(daily_mgC_m2_day)) %>%
+  mutate(ecosystem_group = assign_reference_ecosystem_groups(ecosystem_class)) %>%
+  tidyr::unnest_longer(ecosystem_group) %>%
   mutate(
-    ecosystem_group = factor(assign_reference_ecosystem(ecosystem_class), levels = ecosystem_levels),
-    CH4_behavior    = factor(CH4_behavior, levels = behavior_levels)
-  ) %>%
-  left_join(ecosystem_axis %>% dplyr::select(ecosystem_group, y_base), by = "ecosystem_group") %>%
-  filter(!is.na(y_base))
-
-neon_behavior_yoffset <- c(
-  "Weak-sink"   = -0.22,
-  "Fluctuating" =  0.00,
-  "Weak-source" =  0.22
-)
-
-neon_plot_data <- era5_site_summary %>%
-  mutate(
-    source_label    = factor("NEON ERA5", levels = source_label_levels),
     ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
-    y_base          = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
-    CH4_behavior    = factor(gradient_behavior_for_plot, levels = behavior_levels),
-    y_plot          = y_base + neon_behavior_yoffset[as.character(gradient_behavior_for_plot)]
+    source_row      = factor("Upland towers", levels = source_row_levels)
   ) %>%
-  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day), !is.na(CH4_behavior)) %>%
-  reframe(
-    .by = c(ecosystem_group, source_label, CH4_behavior, y_base, y_plot),
-    n_sites               = dplyr::n(),
-    daily_low_mgC_m2_day  = quantile(daily_mgC_m2_day, 0.25, na.rm = TRUE),
-    daily_high_mgC_m2_day = quantile(daily_mgC_m2_day, 0.75, na.rm = TRUE),
-    daily_mgC_m2_day      = median(daily_mgC_m2_day, na.rm = TRUE)
-  )
+  filter(!is.na(ecosystem_group))
 
 neon_site_points <- era5_site_summary %>%
   mutate(
     ecosystem_group = factor(ecosystem_group, levels = ecosystem_levels),
-    y_base          = length(ecosystem_levels) - as.integer(ecosystem_group) + 1,
-    CH4_behavior    = factor(gradient_behavior_for_plot, levels = behavior_levels),
-    y_plot          = y_base + neon_behavior_yoffset[as.character(gradient_behavior_for_plot)]
+    source_row      = factor("NEON", levels = source_row_levels)
   ) %>%
-  filter(!is.na(y_plot), is.finite(daily_mgC_m2_day), !is.na(CH4_behavior))
-
-source_shapes <- c(
-  "FLUXNET-CH4"       = 21,
-  "Chambers"          = 24,
-  "Process model"     = 22,
-  "Upland towers"     = 1,    # hollow circle — shares circle family with FLUXNET-CH4 and NEON ERA5
-  "Validation towers" = 1,    # placeholder shape; overridden to line in guide
-  "NEON ERA5"         = 21
-)
-source_fills <- c(
-  "FLUXNET-CH4"       = NA,
-  "Chambers"          = "#C49A6C",
-  "Process model"     = "#CBC9E2",
-  "Upland towers"     = NA,
-  "Validation towers" = NA,
-  "NEON ERA5"         = "#009E73"
-)
-source_outline <- c(
-  "FLUXNET-CH4"       = "grey15",
-  "Chambers"          = "#C49A6C",
-  "Process model"     = "#CBC9E2",
-  "Upland towers"     = "#7B3294",
-  "Validation towers" = "#7B3294",
-  "NEON ERA5"         = "#009E73"
-)
-source_legend_fills <- source_fills
-source_legend_fills["FLUXNET-CH4"] <- "white"
-source_legend_fills["NEON ERA5"]   <- "black"
-source_legend_outline <- source_outline
-source_legend_outline["NEON ERA5"] <- "black"
-
-source_label_levels <- names(source_shapes)
-
-source_legend_data <- tibble(
-  source_label = factor(source_label_levels, levels = source_label_levels),
-  daily_mgC_m2_day = 0,
-  y_plot = 0
-)
+  filter(!is.na(source_row), is.finite(daily_mgC_m2_day))
 
 axis_text_size <- 10
 
+# ── One boxplot per data source per ecosystem panel ─────────────────────────
+# Replaces the earlier point/errorbar-per-estimate design. Every source now
+# contributes to a single long-format table (ecosystem_group, source_row,
+# daily_mgC_m2_day); boxplots are then grouped by the SIGN of the flux within
+# each (ecosystem_group, source_row) cell, so a row shows one box if all its
+# values share a sign, or two boxes (one extending left, one right of zero) if
+# both sink and source values are present — this is how NEON's own
+# weak-sink/weak-source split is preserved without a dedicated row per class.
+# Box color encodes sign only (blue = sink, red = source), matching the
+# background shading, so no shape/pch legend is needed.
+bar_source_data <- bind_rows(
+  reference_plot_data %>%
+    filter(source_label %in% c("FLUXNET-CH4", "Chambers", "Process model")) %>%
+    transmute(ecosystem_group, source_row = as.character(source_label), daily_mgC_m2_day),
+  reference_plot_data %>%
+    filter(source_label == "Upland towers") %>%
+    transmute(ecosystem_group, source_row = "Upland towers", daily_mgC_m2_day),
+  validation_tower_points %>%
+    transmute(ecosystem_group, source_row = "Upland towers", daily_mgC_m2_day),
+  neon_site_points %>%
+    transmute(ecosystem_group, source_row = "NEON", daily_mgC_m2_day)
+) %>%
+  filter(is.finite(daily_mgC_m2_day)) %>%
+  mutate(
+    source_row = factor(source_row, levels = source_row_levels),
+    sign_class = case_when(
+      daily_mgC_m2_day < 0 ~ "Sink",
+      daily_mgC_m2_day > 0 ~ "Source",
+      TRUE                 ~ "Fluctuating"
+    )
+  )
+
+bar_source_data <- bar_source_data %>%
+  mutate(sign_class = factor(sign_class, levels = c("Sink", "Fluctuating", "Source")))
+
+# Shared builder for the two summary facets below ("All ecosystems", "All
+# Upland"): pools the same four source rows, deduplicated on the ORIGINAL
+# record identity (ecosystem_class / site_id), not the already-exploded
+# ecosystem_group, so composite reference rows replicated across several
+# ecosystem panels (FLUXNET's "Upland"/"Drained" aggregates, any "tundra"
+# class -- see assign_reference_ecosystem_groups()) are only counted once
+# rather than once per panel they appear in. When restrict_upland = TRUE,
+# only rows whose exploded ecosystem_group falls in upland_eco_groups are
+# pooled (mirrors the density plot's upland-only filtering).
+build_summary_facet_data <- function(facet_label, restrict_upland = FALSE) {
+  ref_data  <- reference_plot_data
+  val_data  <- validation_tower_points
+  neon_data <- neon_site_points
+  if (restrict_upland) {
+    ref_data  <- ref_data  %>% filter(as.character(ecosystem_group) %in% upland_eco_groups)
+    val_data  <- val_data  %>% filter(as.character(ecosystem_group) %in% upland_eco_groups)
+    neon_data <- neon_data %>% filter(as.character(ecosystem_group) %in% upland_eco_groups)
+  }
+  bind_rows(
+    ref_data %>%
+      filter(source_label %in% c("FLUXNET-CH4", "Chambers", "Process model")) %>%
+      distinct(source_label, ecosystem_class, daily_mgC_m2_day, .keep_all = TRUE) %>%
+      transmute(source_row = as.character(source_label), daily_mgC_m2_day),
+    ref_data %>%
+      filter(source_label == "Upland towers") %>%
+      distinct(ecosystem_class, daily_mgC_m2_day, .keep_all = TRUE) %>%
+      transmute(source_row = "Upland towers", daily_mgC_m2_day),
+    val_data %>%
+      distinct(site_id, daily_mgC_m2_day, .keep_all = TRUE) %>%
+      transmute(source_row = "Upland towers", daily_mgC_m2_day),
+    neon_data %>%
+      transmute(source_row = "NEON", daily_mgC_m2_day)
+  ) %>%
+    filter(is.finite(daily_mgC_m2_day)) %>%
+    mutate(
+      ecosystem_group = factor(facet_label, levels = ecosystem_levels),
+      source_row = factor(source_row, levels = source_row_levels),
+      sign_class = case_when(
+        daily_mgC_m2_day < 0 ~ "Sink",
+        daily_mgC_m2_day > 0 ~ "Source",
+        TRUE                 ~ "Fluctuating"
+      ),
+      sign_class = factor(sign_class, levels = c("Sink", "Fluctuating", "Source"))
+    )
+}
+
+all_ecosystems_data <- build_summary_facet_data("All ecosystems")
+all_upland_data     <- build_summary_facet_data("All Upland", restrict_upland = TRUE)
+
+bar_source_data <- bind_rows(bar_source_data, all_ecosystems_data, all_upland_data)
+
+sign_colors      <- c("Sink" = "#2166AC", "Fluctuating" = "grey35", "Source" = "#B2182B")
+sign_colors_dark <- c("Sink" = "#0A3161", "Fluctuating" = "grey15", "Source" = "#7A1216")
+
 comparison_figure <- ggplot() +
-  annotate(
+  # Four magnitude zones (repeated automatically in every facet panel). Zone
+  # labels aren't drawn per-panel — with several ecosystem facets that was too much
+  # repeated text — the boundaries are explained once in the plot subtitle
+  # instead, and marked with dotted threshold lines below.
+  annotate(  # strong-sink
     "rect",
-    xmin = -5,
-    xmax = 0,
-    ymin = -Inf,
-    ymax = Inf,
-    fill = "#BFDDF5",
-    alpha = 0.52
+    xmin = -Inf, xmax = -sink_threshold, ymin = -Inf, ymax = Inf,
+    fill = "#2166AC", alpha = 0.30
   ) +
-  annotate(
-    "text",
-    x = -0.22,
-    y = max(ecosystem_axis$y_base) + 0.42,
-    label = "Weak-sink",
-    color = "#2166AC",
-    fontface = "bold",
-    size = 3.5,
-    hjust = 0.5
-  ) +
-  annotate(
+  annotate(  # weak-sink
     "rect",
-    xmin = 0,
-    xmax = 5,
-    ymin = -Inf,
-    ymax = Inf,
-    fill = "#F5C0BD",
-    alpha = 0.48
+    xmin = -sink_threshold, xmax = 0, ymin = -Inf, ymax = Inf,
+    fill = "#BFDDF5", alpha = 0.52
   ) +
-  annotate(
-    "text",
-    x = 0.22,
-    y = max(ecosystem_axis$y_base) + 0.42,
-    label = "Weak-source",
-    color = "#B2182B",
-    fontface = "bold",
-    size = 3.5,
-    hjust = 0.5
+  annotate(  # weak-source
+    "rect",
+    xmin = 0, xmax = source_threshold, ymin = -Inf, ymax = Inf,
+    fill = "#F5C0BD", alpha = 0.48
+  ) +
+  annotate(  # strong-source
+    "rect",
+    xmin = source_threshold, xmax = Inf, ymin = -Inf, ymax = Inf,
+    fill = "#B2182B", alpha = 0.28
   ) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey35", linewidth = 0.5) +
-  geom_hline(
-    data = ecosystem_axis,
-    aes(yintercept = y_base),
-    color = "grey92",
-    linewidth = 0.35
+  geom_vline(
+    xintercept = c(-sink_threshold, source_threshold),
+    linetype = "dotted", color = "grey45", linewidth = 0.4
   ) +
-  # Reference source errorbars — fixed colors by source type
-  geom_errorbar(
-    data = reference_plot_data %>% filter(source_label == "FLUXNET-CH4"),
-    aes(x = daily_mgC_m2_day, y = y_plot,
-        xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
-    orientation = "y", width = 0.07, linewidth = 0.85,
-    color = source_outline["FLUXNET-CH4"], alpha = 0.65
+  # One boxplot per (ecosystem, source, sign) — up to two boxes per row when a
+  # source has both sink and source values in a given ecosystem panel. Boxes
+  # sit at the same y position (source_row, no dodge) and separate naturally
+  # along x because sink values are negative and source values are positive.
+  geom_boxplot(
+    data = bar_source_data,
+    aes(x = daily_mgC_m2_day, y = source_row, fill = sign_class, color = sign_class),
+    orientation = "y", width = 0.6, linewidth = 0.4,
+    alpha = 0.85, outlier.size = 1.2, outlier.alpha = 0.6,
+    position = position_identity()
   ) +
-  geom_errorbar(
-    data = reference_plot_data %>% filter(source_label == "Chambers"),
-    aes(x = daily_mgC_m2_day, y = y_plot,
-        xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
-    orientation = "y", width = 0.07, linewidth = 0.85,
-    color = source_outline["Chambers"], alpha = 0.65
-  ) +
-  geom_errorbar(
-    data = reference_plot_data %>% filter(source_label == "Process model"),
-    aes(x = daily_mgC_m2_day, y = y_plot,
-        xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
-    orientation = "y", width = 0.07, linewidth = 0.85,
-    color = source_outline["Process model"], alpha = 0.65
-  ) +
-  geom_errorbar(
-    data = reference_plot_data %>% filter(source_label == "Upland towers"),
-    aes(x = daily_mgC_m2_day, y = y_plot,
-        xmin = daily_low_mgC_m2_day, xmax = daily_high_mgC_m2_day),
-    orientation = "y", width = 0.07, linewidth = 0.85,
-    color = source_outline["Upland towers"], alpha = 0.65
-  ) +
-  # Validation tower individual site segments — distinct purple, not part of behavior scale
-  geom_segment(
-    data = validation_tower_line_data,
-    aes(x = daily_mgC_m2_day, xend = daily_mgC_m2_day,
-        y = y_base - 0.30, yend = y_base + 0.30),
-    color = "#7B3294",
-    linewidth = 1.8,
-    alpha = 0.82,
-    show.legend = FALSE
-  ) +
-  # Ghost points for shape legend (all sources except Validation towers)
+  # Validation tower sites overlaid as stars so their individual values are
+  # visible within the "Upland towers" box (they're folded into that row's
+  # boxplot above and would otherwise be indistinguishable from it).
   geom_point(
-    data = source_legend_data %>%
-      filter(as.character(source_label) != "Validation towers") %>%
-      mutate(source_label = droplevels(source_label)),
-    aes(x = daily_mgC_m2_day, y = y_plot, shape = source_label),
-    alpha = 0, size = 0, show.legend = TRUE
+    data = validation_tower_points,
+    aes(x = daily_mgC_m2_day, y = source_row, shape = "Validation tower site"),
+    color = "black", fill = "black", size = 2.6, stroke = 0.8,
+    position = position_jitter(height = 0.12, width = 0, seed = 20260525)
   ) +
-  # Validation towers ghost — key_glyph="path" renders as a line in the legend
-  geom_point(
-    data = source_legend_data %>%
-      filter(as.character(source_label) == "Validation towers"),
-    aes(x = daily_mgC_m2_day, y = y_plot, shape = source_label),
-    color = "#7B3294", linewidth = 2, alpha = 0, size = 0, show.legend = TRUE,
-    key_glyph = "path"
-  ) +
-  # Reference source points — fixed colors by source type
-  geom_point(
-    data = reference_plot_data %>% filter(source_label == "FLUXNET-CH4"),
-    aes(x = daily_mgC_m2_day, y = y_plot),
-    shape = source_shapes["FLUXNET-CH4"],
-    fill = source_fills["FLUXNET-CH4"],
-    color = source_outline["FLUXNET-CH4"],
-    size = 4.5, stroke = 1.0, alpha = 0.65
-  ) +
-  geom_point(
-    data = reference_plot_data %>% filter(source_label == "Chambers"),
-    aes(x = daily_mgC_m2_day, y = y_plot),
-    shape = source_shapes["Chambers"],
-    fill = source_fills["Chambers"],
-    color = source_outline["Chambers"],
-    size = 4.5, stroke = 1.0, alpha = 0.65
-  ) +
-  geom_point(
-    data = reference_plot_data %>% filter(source_label == "Process model"),
-    aes(x = daily_mgC_m2_day, y = y_plot),
-    shape = source_shapes["Process model"],
-    fill = source_fills["Process model"],
-    color = source_outline["Process model"],
-    size = 4.5, stroke = 1.0, alpha = 0.65
-  ) +
-  geom_point(
-    data = reference_plot_data %>% filter(source_label == "Upland towers"),
-    aes(x = daily_mgC_m2_day, y = y_plot),
-    shape = source_shapes["Upland towers"],
-    color = source_outline["Upland towers"],
-    size = 4.5, stroke = 1.2, alpha = 0.65
-  ) +
-  # NEON individual site points — colored by state class, no summary
-  geom_point(
-    data = neon_site_points,
-    aes(x = daily_mgC_m2_day, y = y_plot, color = CH4_behavior, fill = CH4_behavior),
-    shape = source_shapes["NEON ERA5"],
-    alpha = 0.35, size = 3.5, stroke = 0.8,
-    position = position_jitter(height = 0.06, width = 0, seed = 20260525)
-  ) +
-  # Ghost point for state class color legend
-  geom_point(
-    data = tibble(
-      daily_mgC_m2_day = 0,
-      y_plot = 0,
-      CH4_behavior = factor(behavior_levels, levels = behavior_levels)
-    ),
-    aes(x = daily_mgC_m2_day, y = y_plot, color = CH4_behavior),
-    alpha = 0, size = 0, show.legend = TRUE
-  ) +
-  scale_shape_manual(values = source_shapes, breaks = source_label_levels, name = "Data source") +
-  scale_fill_manual(values = behavior_colors, breaks = behavior_levels, guide = "none", drop = FALSE, na.translate = FALSE) +
-  scale_color_manual(values = behavior_colors, breaks = behavior_levels, labels = behavior_labels[behavior_levels], name = "State class", drop = FALSE, na.translate = FALSE) +
+  facet_wrap(~ ecosystem_group, ncol = 3) +
+  scale_fill_manual(values = sign_colors, breaks = c("Sink", "Source"), name = "Flux direction") +
+  scale_color_manual(values = sign_colors_dark, breaks = c("Sink", "Source"), guide = "none") +
+  scale_shape_manual(values = c("Validation tower site" = 8), name = NULL) +
   scale_x_continuous(
     trans = pseudo_log_trans(sigma = 0.01),
     breaks = c(-20, -5, -1, -0.1, 0, 0.1, 1, 10, 100),
     labels = c("-20", "-5", "-1", "-0.1", "0", "0.1", "1", "10", "100")
   ) +
-  scale_y_continuous(
-    breaks = ecosystem_axis$y_base,
-    labels = ecosystem_axis$ecosystem_group,
-    expand = expansion(mult = c(0.05, 0.12))
-  ) +
+  scale_y_discrete(limits = rev(source_row_levels), drop = FALSE) +
   labs(
     title = expression(bold("ERA5-gapfilled NEON gradient CH"[4]*" fluxes vs. published benchmarks")),
     x = expression("Daily CH"[4] * " flux (mg C m"^-2 * " d"^-1 * "; pseudo-log scale)"),
     y = NULL
   ) +
-  guides(
-    shape = guide_legend(
-      override.aes = list(
-        # order: FLUXNET-CH4, Chambers, Process model, Upland towers, Validation towers, NEON ERA5
-        shape     = c(21,       24,          22,              1,               1,                    21),
-        size      = c(4.5,      4.5,         4.5,             4.5,             0,                    4.5),
-        linewidth = c(0.5,      0.5,         0.5,             0.5,             2.0,                  0.5),
-        alpha     = 1,
-        fill      = c("white",  "#C49A6C",   "#CBC9E2",       NA,              NA,                   "black"),
-        colour    = c("grey15", "#C49A6C",   "#CBC9E2",       "#7B3294",       "#7B3294",            "black"),
-        stroke    = 1.0
-      ),
-      order = 1,
-      nrow = 2
-    ),
-    color = guide_legend(
-      override.aes = list(shape = 16, size = 4, alpha = 1, color = unname(behavior_colors[behavior_levels])),
-      order = 2,
-      nrow = 1
-    ),
-    fill = "none"
-  ) +
   theme_bw(base_size = base_plot_size) +
   theme(
     legend.position = "bottom",
     legend.justification = "center",
-    legend.box = "vertical",
     plot.title = element_text(face = "bold", size = panel_title_size),
     plot.margin = margin(t = 5, r = 15, b = 5, l = 5),
     axis.title = element_text(size = axis_title_size),
     axis.text = element_text(size = axis_text_size),
+    axis.text.y = element_text(size = axis_text_size - 1),
     legend.title = element_text(size = legend_title_size),
     legend.text = element_text(size = legend_text_size),
+    strip.background = element_rect(fill = "black", color = NA),
+    strip.text = element_text(face = "bold", size = axis_title_size, color = "white"),
+    panel.spacing = unit(1, "lines"),
     panel.grid.major.y = element_blank(),
     panel.grid.minor = element_blank()
   )
@@ -1162,24 +1184,59 @@ comparison_figure <- ggplot() +
 ggsave(
   "FIGURES/NEON_FLUXNET_CH4_flux_comparison.png",
   plot = comparison_figure,
-  width = 18,
-  height = 12,
+  width = 16,
+  height = 15,
   units = "in",
   dpi = 300
 )
 
 message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_comparison.png")
 
+# Detailed caption, written alongside the figure rather than as an in-plot
+# subtitle (the full explanation doesn't fit on the plot itself). Threshold
+# value is pulled from sink_threshold so the text always matches the figure.
+comparison_figure_caption <- paste0(
+  "Figure. ERA5-gapfilled NEON gradient CH4 fluxes compared with published benchmarks. ",
+  "Each panel is an ecosystem class; within a panel, rows are data sources: ",
+  "FLUXNET-CH4 (Delwiche et al. 2021 published ecosystem-class values), Chambers ",
+  "(soil chamber literature, including the SMUD compilation), Process model ",
+  "(MeMo v1.0 process-based estimates), Upland towers (non-FLUXNET tower literature ",
+  "and SMUD eddy-covariance towers; individual validation-tower site values are ",
+  "additionally marked with black stars), and NEON (ERA5-gapfilled gradient/tower ",
+  "CH4 budgets for individual NEON sites). Each row is drawn as a boxplot (median, ",
+  "interquartile range, and whiskers to the data range) rather than a single point ",
+  "estimate, so the spread of values contributing to each source/ecosystem cell is ",
+  "visible. A row shows two boxes when a source has both sink (flux < 0) and source ",
+  "(flux > 0) values within an ecosystem class -- most visibly for NEON, whose sites ",
+  "split into weak-sink and weak-source behavior within several ecosystem classes. ",
+  "Box and background shading color encodes flux direction only (blue = sink, ",
+  "red = source), not data source. ",
+  "Background shading divides each panel into four magnitude zones -- strong-sink, ",
+  "weak-sink, weak-source, strong-source -- separated at a fixed, shared threshold ",
+  "of ±", round(sink_threshold, 2), " mg C m-2 d-1. The same threshold magnitude is ",
+  "used on both the sink and source sides so the shading is symmetric around zero; ",
+  "because source fluxes are ",
+  "typically an order of magnitude larger than sink fluxes (e.g., wetland CH4 ",
+  "emission vs. upland CH4 uptake), most individual source-side estimates -- ",
+  "including many NEON sites classified elsewhere in this analysis as ",
+  "\"weak-source\" -- fall in the strong-source shaded zone here; the shading should ",
+  "be read as a magnitude reference scale rather than a formal sink/source ",
+  "classification. The x-axis uses a pseudo-log transform (linear near zero, ",
+  "logarithmic at larger magnitudes) to accommodate the wide range of flux ",
+  "magnitudes across ecosystem classes on a single scale."
+)
+writeLines(
+  strwrap(comparison_figure_caption, width = 100),
+  "FIGURES/NEON_FLUXNET_CH4_flux_comparison_caption.txt"
+)
+message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_comparison_caption.txt")
+
 # ── Density plot: NEON towers vs upland towers vs chambers ────────────────────
 
 density_group_colors <- c(
-  "Towers"   = "black",
-  "Chambers" = "#C49A6C"
+  "Towers"   = "maroon",
+  "Chambers" = "navy"
 )
-
-# Upland (non-inundated) ecosystem groups — excludes Wetland and Lake
-upland_eco_groups <- c("Urban", "Cropland", "Forest", "Shrubland",
-                       "Grassland/Savanna", "Tundra", "Upland/Desert")
 
 density_plot_data <- bind_rows(
   # Towers: NEON ERA5 site medians — upland only
@@ -1188,7 +1245,7 @@ density_plot_data <- bind_rows(
     transmute(flux = daily_mgC_m2_day, group = "Towers"),
   # Towers: site-year values from measured validation towers — upland only
   non_fluxnet_tower_years %>%
-    filter(assign_reference_ecosystem(ecosystem_class) %in% upland_eco_groups) %>%
+    filter(is_any_upland(ecosystem_class)) %>%
     transmute(flux = daily_mgC_m2_day, group = "Towers"),
   # Towers: literature summary values (all upland forests)
   additional_draft_tower_reference %>%
@@ -1199,7 +1256,7 @@ density_plot_data <- bind_rows(
     transmute(flux = Annual, group = "Towers"),
   # Chambers: literature summary values — upland only
   soil_chamber_reference %>%
-    filter(assign_reference_ecosystem(ecosystem_class) %in% upland_eco_groups) %>%
+    filter(is_any_upland(ecosystem_class)) %>%
     transmute(flux = daily_mgC_m2_day, group = "Chambers"),
   additional_draft_chamber_reference %>%
     transmute(flux = daily_mgC_m2_day, group = "Chambers"),
@@ -1215,16 +1272,60 @@ density_n_labels <- density_plot_data %>%
   count(group) %>%
   mutate(label = paste0(group, "\n(n = ", n, ")"))
 
+# Center each zone label within the section actually visible on the plot.
+# Zone midpoints must be computed in the SAME pseudo-log transformed space
+# the x-axis is drawn in, not in raw data units — the x-axis is heavily
+# log-compressed (sigma = 0.01), so e.g. the raw arithmetic midpoint of the
+# weak-source zone (0 to 10) is 5, but 5 sits ~90% of the way through that
+# zone visually (it's deep in the last decade, 1-10), which is why the
+# earlier raw-mean version put labels hard against the zone edges instead of
+# centered. Transforming, averaging, then inverting back to data units fixes
+# this for all four zones. Strong-sink/strong-source still use the real data
+# extent (density_flux_range) as their finite outer bound, since ±Inf has no
+# transformed value to average.
+density_flux_range <- range(density_plot_data$flux, na.rm = TRUE)
+pslog <- pseudo_log_trans(sigma = 0.01)
+zone_mid <- function(lo, hi) pslog$inverse(mean(pslog$transform(c(lo, hi))))
+zone_label_x <- c(
+  zone_mid(density_flux_range[1], -sink_threshold),   # strong-sink
+  zone_mid(-sink_threshold, 0),                        # weak-sink
+  zone_mid(0, source_threshold),                       # weak-source
+  zone_mid(source_threshold, density_flux_range[2])    # strong-source
+)
+
 flux_density_figure <- ggplot(density_plot_data, aes(x = flux, fill = group, color = group)) +
-  annotate(
-    "rect", xmin = -5, xmax = 0, ymin = -Inf, ymax = Inf,
-    fill = "#BFDDF5", alpha = 0.40
+  # Background shading matches comparison_figure's sink/source zone colors
+  # and thresholds (sink_threshold == source_threshold — shared, balanced cutoff).
+  annotate(  # strong-sink
+    "rect", xmin = -Inf, xmax = -sink_threshold, ymin = -Inf, ymax = Inf,
+    fill = "#2166AC", alpha = 0.30
   ) +
-  annotate(
-    "rect", xmin = 0, xmax = 5, ymin = -Inf, ymax = Inf,
-    fill = "#FF9999", alpha = 0.55
+  annotate(  # weak-sink
+    "rect", xmin = -sink_threshold, xmax = 0, ymin = -Inf, ymax = Inf,
+    fill = "#BFDDF5", alpha = 0.52
+  ) +
+  annotate(  # weak-source
+    "rect", xmin = 0, xmax = source_threshold, ymin = -Inf, ymax = Inf,
+    fill = "#F5C0BD", alpha = 0.48
+  ) +
+  annotate(  # strong-source
+    "rect", xmin = source_threshold, xmax = Inf, ymin = -Inf, ymax = Inf,
+    fill = "#B2182B", alpha = 0.28
   ) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey35", linewidth = 0.5) +
+  geom_vline(
+    xintercept = c(-sink_threshold, source_threshold),
+    linetype = "dotted", color = "grey45", linewidth = 0.4
+  ) +
+  # Zone labels — feasible here (single panel) where it wasn't in the faceted
+  # comparison_figure. Placed near the top of the plot, one per zone.
+  annotate(
+    "text",
+    x = zone_label_x,
+    y = Inf,
+    label = c("Strong-sink", "Weak-sink", "Weak-source", "Strong-source"),
+    vjust = 1.3, size = 3.2, fontface = "bold", color = "grey15"
+  ) +
   geom_density(alpha = 0.35, linewidth = 1.0, trim = FALSE) +
   scale_x_continuous(
     trans  = pseudo_log_trans(sigma = 0.01),
@@ -1249,7 +1350,7 @@ flux_density_figure <- ggplot(density_plot_data, aes(x = flux, fill = group, col
     panel.grid.minor = element_blank()
   ) +
   labs(
-    title = expression(bold("Non-inundated CH"[4]*" flux distributions: towers vs chambers")),
+    title = expression(bold("Upland CH"[4]*" flux distributions: towers vs chambers")),
     x     = expression("Daily CH"[4] * " flux (mg C m"^-2 * " d"^-1 * "; pseudo-log scale)"),
     y     = "Density"
   )
@@ -1299,3 +1400,47 @@ ggsave(
 )
 
 message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_combined.png")
+
+# Detailed caption for the two-panel combined figure. Built from the same
+# sink_threshold value used in both panels so the text always matches what's
+# drawn (both panels share the same threshold and zone colors).
+combined_figure_caption <- paste0(
+  "Figure. ERA5-gapfilled NEON gradient CH4 fluxes compared with published benchmarks, ",
+  "by ecosystem class (A) and for upland ecosystems only (B). ",
+  "(A) Each panel is an ecosystem class; within a panel, rows are data sources: ",
+  "FLUXNET-CH4 (Delwiche et al. 2021 published ecosystem-class values), Chambers ",
+  "(soil chamber literature, including the SMUD compilation), Process model ",
+  "(MeMo v1.0 process-based estimates), Upland towers (non-FLUXNET tower literature ",
+  "and SMUD eddy-covariance towers; individual validation-tower site values are ",
+  "additionally marked with black stars), and NEON (ERA5-gapfilled gradient/tower ",
+  "CH4 budgets for individual NEON sites). Each row is drawn as a boxplot (median, ",
+  "interquartile range, and whiskers to the data range); a row shows two boxes when ",
+  "a source has both sink (flux < 0) and source (flux > 0) values within an ",
+  "ecosystem class -- most visibly for NEON, whose sites split into weak-sink and ",
+  "weak-source behavior within several ecosystem classes. Box color encodes flux ",
+  "direction only (blue = sink, red = source), not data source. ",
+  "(B) Kernel density distributions of daily CH4 flux for upland (non-inundated) ",
+  "ecosystem classes only, pooling all towers (maroon; NEON ERA5-gapfilled sites, ",
+  "validation towers, and SMUD eddy-covariance towers) against all chambers (navy; ",
+  "soil chamber literature and SMUD chamber studies), to compare the overall shape ",
+  "and central tendency of tower- vs. chamber-based flux estimates independent of ",
+  "ecosystem-class binning. ",
+  "In both panels, background shading divides the flux axis into four magnitude ",
+  "zones -- strong-sink, weak-sink, weak-source, strong-source -- separated at a ",
+  "fixed, shared threshold of ±", round(sink_threshold, 2), " mg C m-2 d-1. The same ",
+  "threshold magnitude is used on both the sink and source sides so the shading is ",
+  "symmetric around zero; because ",
+  "source fluxes are typically an order of magnitude larger than sink fluxes (e.g., ",
+  "wetland CH4 emission vs. upland CH4 uptake), most individual source-side ",
+  "estimates -- including many NEON sites classified elsewhere in this analysis as ",
+  "\"weak-source\" -- fall in the strong-source shaded zone; the shading should be ",
+  "read as a magnitude reference scale rather than a formal sink/source ",
+  "classification. Both panels use a pseudo-log x-axis transform (linear near zero, ",
+  "logarithmic at larger magnitudes) to accommodate the wide range of flux ",
+  "magnitudes on a single scale."
+)
+writeLines(
+  strwrap(combined_figure_caption, width = 100),
+  "FIGURES/NEON_FLUXNET_CH4_flux_combined_caption.txt"
+)
+message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_combined_caption.txt")

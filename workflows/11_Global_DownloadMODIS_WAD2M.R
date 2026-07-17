@@ -44,36 +44,76 @@ get_cmr_mcd12c1 <- function(year) {
   }
   entry <- cmr$feed$entry[[1]]
   data_url <- entry$links %>%
-    keep(~ !is.null(.x$href) && str_detect(.x$href, "\\.hdf$")) %>%
+    keep(~ !is.null(.x$href) && str_detect(.x$href, "\\.hdf(?:\\?|$)")) %>%
     pluck(1, "href", .default = NA_character_)
   tibble(Year = year, title = entry$title, url = data_url)
 }
 
 manifest_file <- file.path(modis_hdf_dir, "MCD12C1_CMR_manifest.csv")
-if (file.exists(manifest_file)) {
+manifest_is_current <- file.exists(manifest_file) && {
+  existing_manifest <- read.csv(manifest_file)
+  all(years %in% existing_manifest$Year) &&
+    all(!is.na(existing_manifest$url[match(years, existing_manifest$Year)]))
+}
+if (manifest_is_current) {
   message("Using existing MODIS MCD12C1 CMR manifest.")
-  modis_manifest <- read.csv(manifest_file)
+  modis_manifest <- existing_manifest
 } else {
-  message("Building MODIS MCD12C1 CMR manifest.")
+  message("Building or refreshing MODIS MCD12C1 CMR manifest.")
   modis_manifest <- map_dfr(years, get_cmr_mcd12c1)
   write.csv(modis_manifest, manifest_file, row.names = FALSE)
 }
 
+is_hdf4_file <- function(path) {
+  if (!file.exists(path) || file.info(path)$size < 4) return(FALSE)
+  signature <- readBin(path, what = "raw", n = 4)
+  identical(signature, as.raw(c(0x0e, 0x03, 0x13, 0x01)))
+}
+
 download_modis_hdf <- identical(tolower(Sys.getenv("DOWNLOAD_MODIS_HDF", unset = "true")), "true")
 if (download_modis_hdf) {
+  netrc_file <- path.expand(Sys.getenv("EARTHDATA_NETRC", unset = "~/.netrc"))
+  if (!file.exists(netrc_file) ||
+      !any(str_detect(readLines(netrc_file, warn = FALSE), "machine\\s+urs\\.earthdata\\.nasa\\.gov"))) {
+    stop(
+      "MODIS downloads require NASA Earthdata credentials. Create ", netrc_file,
+      " containing:\n",
+      "machine urs.earthdata.nasa.gov login YOUR_USERNAME password YOUR_PASSWORD\n",
+      "then restrict its permissions with: chmod 600 ", netrc_file,
+      "\nYou may instead set EARTHDATA_NETRC to another credential-file path."
+    )
+  }
+  cookie_file <- file.path(modis_hdf_dir, ".urs_cookies")
+
   for (i in seq_len(nrow(modis_manifest))) {
     row <- modis_manifest[i, ]
     if (is.na(row$url)) next
     out_file <- file.path(modis_hdf_dir, paste0(row$title, ".hdf"))
-    if (file.exists(out_file) && file.info(out_file)$size > 1e6) {
+    if (is_hdf4_file(out_file)) {
       message("Skipping existing MODIS HDF: ", basename(out_file))
       next
     }
-    message("Downloading MODIS HDF for ", row$Year, ". If this fails, add NASA Earthdata credentials.")
-    status <- system2("curl", c("-n", "-L", "-c", ".urs_cookies", "-b", ".urs_cookies", "-o", shQuote(out_file), shQuote(row$url)))
-    if (!identical(status, 0L) || !file.exists(out_file) || file.info(out_file)$size < 1e6) {
-      warning("MODIS HDF download failed or returned an authorization stub for year ", row$Year)
+    part_file <- paste0(out_file, ".part")
+    if (file.exists(part_file)) unlink(part_file)
+    message("Downloading MODIS HDF for ", row$Year, " ...")
+    status <- system2(
+      "curl",
+      c(
+        "--fail", "--show-error", "--location",
+        "--netrc-file", shQuote(netrc_file),
+        "--cookie", shQuote(cookie_file), "--cookie-jar", shQuote(cookie_file),
+        "--output", shQuote(part_file), shQuote(row$url)
+      )
+    )
+    if (!identical(status, 0L) || !is_hdf4_file(part_file)) {
+      if (file.exists(part_file)) unlink(part_file)
+      stop(
+        "MODIS download failed for ", row$Year,
+        ". Confirm your Earthdata username/password and authorize LP DAAC data access ",
+        "in your Earthdata account. curl exit status: ", status
+      )
     }
+    if (!file.rename(part_file, out_file)) stop("Could not finalize downloaded file: ", out_file)
   }
 }
 
@@ -92,6 +132,25 @@ read_modis_igbp <- function(hdf_file) {
 classify_modis_to_ecotype <- function(igbp) {
   # IGBP classes: 0 water; 1-5 forest; 6-7 shrubland; 8-10 savanna/grassland;
   # 11 wetlands; 12 cropland; 13 urban; 14 cropland mosaic; 15 snow/ice; 16 barren.
+  #
+  # This is the ONLY place non-upland land cover gets excluded from the
+  # global upscaling grid (13_Global_SpatialUpscalingRF.R's ecotype_lookup
+  # inner_join drops any code not in its lookup table, so mapping a class to
+  # NA here is what actually removes it from the grid downstream):
+  #   Class  0 (Water)              -> NA (excluded)
+  #   Class 11 (Permanent Wetlands) -> NA (excluded)
+  #   Class 13 (Urban and Built-up) -> NA (excluded)
+  #   Class 15 (Snow/Ice)           -> NA (excluded)
+  #   Class 12 (Croplands) and 14 (Cropland/Natural Vegetation Mosaic) ->
+  #     code 1 (Cropland); NOT excluded here, but 13_Global_SpatialUpscalingRF.R's
+  #     ecotype_lookup filters EcoType != "Cropland" right after the join, so
+  #     these are excluded one step downstream instead.
+  # Note this only screens each 0.05deg pixel's MAJORITY land cover -- a
+  # pixel that's mostly upland but partly flooded (floodplain forest,
+  # scattered wetlands) stays in the grid and is instead area-down-weighted
+  # by WAD2M's continuous inundation fraction in 13_Global_SpatialUpscalingRF.R,
+  # not excluded here or there (see that script's WAD2M loading comment for
+  # why a hard cutoff there would wrongly drop legitimate upland cells too).
   #
   # Both barren / desert classes are assigned code 5 (Arid) so that hyper-arid
   # cells receive sink-only treatment instead of inheriting Shrubland source
@@ -117,7 +176,7 @@ if (file.exists(era5_template_file)) {
 
 hdf_files <- list.files(modis_hdf_dir, pattern = "^MCD12C1\\..*\\.hdf$", full.names = TRUE)
 for (hdf_file in hdf_files) {
-  if (file.info(hdf_file)$size < 1e6) next
+  if (!is_hdf4_file(hdf_file)) next
   year <- as.integer(str_match(basename(hdf_file), "A([0-9]{4})001")[, 2])
   out_file <- file.path(modis_processed_dir, sprintf("MODIS_MCD12C1_ecotype_%s.tif", year))
   if (file.exists(out_file)) next

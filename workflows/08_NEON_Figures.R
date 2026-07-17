@@ -91,6 +91,57 @@ theme_neon <- function(base_size = FIG_BASE) {
     )
 }
 
+# ── Helper: duplicate the top column-strip labels at the bottom of a facet_grid ──
+# facet_grid() only draws column strips once, at the top. This clones the already-
+# rendered top-strip grobs into a new row inserted just above the legend (guide-box)
+# — i.e. still within the plot panel area, not stuck below the legend at the very
+# bottom of the image. Falls back to appending at the very bottom if no legend is
+# found. Aligned to the same panel columns as the top strip.
+duplicate_top_strip_to_bottom <- function(gg) {
+  g <- ggplotGrob(gg)
+  strip_idx <- grep("^strip-t", g$layout$name)
+  if (length(strip_idx) == 0) {
+    warning("duplicate_top_strip_to_bottom(): no top strips found; returning plot unchanged.")
+    return(g)
+  }
+  strip_layout <- g$layout[strip_idx, ]
+  strip_height <- g$heights[unique(strip_layout$t)]
+
+  # Insert directly above the legend (guide-box) if present; otherwise at the bottom.
+  # ggplotGrob() always reserves a "guide-box-<side>" slot for all four legend
+  # positions, filling the unused ones with an empty zeroGrob placeholder near the
+  # top of the gtable -- so we must exclude those and keep only the real legend.
+  guide_candidates <- grep("^guide-box", g$layout$name)
+  guide_idx <- guide_candidates[
+    vapply(guide_candidates, function(i) !inherits(g$grobs[[i]], "zeroGrob"), logical(1))
+  ]
+  insert_pos <- if (length(guide_idx) > 0) min(g$layout$t[guide_idx]) - 1 else nrow(g)
+
+  g <- gtable::gtable_add_rows(g, strip_height, pos = insert_pos)
+  new_row <- insert_pos + 1
+
+  for (i in seq_len(nrow(strip_layout))) {
+    g <- gtable::gtable_add_grob(
+      g,
+      g$grobs[[strip_idx[i]]],
+      t = new_row, b = new_row,
+      l = strip_layout$l[i], r = strip_layout$r[i],
+      name = paste0("strip-b-dup-", i)
+    )
+  }
+  g
+}
+
+# ── Helper: render "-2"/"-1" unit exponents as proper superscripts ─────────────
+# e.g. "nmol C m-2 s-1" -> "nmol C m⁻² s⁻¹" (m⁻² s⁻¹)
+superscript_units <- function(x) {
+  x <- gsub("m-2", "m⁻²", x, fixed = TRUE)
+  x <- gsub("s-1", "s⁻¹", x, fixed = TRUE)
+  x <- gsub("d-1", "d⁻¹", x, fixed = TRUE)
+  x <- gsub("yr-1", "yr⁻¹", x, fixed = TRUE)
+  x
+}
+
 # ── Load CSVs ─────────────────────────────────────────────────────────────────
 
 # ── ERA5 behavior lookup (loaded first; used to reclassify all figures) ────────
@@ -157,12 +208,17 @@ scale_long_summary <- read.csv("OUTPUT/NEON_scale_long_flux_budget_summary.csv")
 
 all_site_flux_magnitude_summary <- read.csv("OUTPUT/NEON_all_site_flux_magnitude_summary.csv") %>%
   mutate(
-    EcoType     = as.character(EcoType),
-    scale       = recode(scale, "Annual scaled" = "Annual"),
+    EcoType = as.character(EcoType),
+    scale   = recode(scale, "Annual scaled" = "Annual"),
+    # 30-min flux: convert umol -> nmol C m-2 s-1 (x1000)
+    across(c(flux_native, flux_lower_native, flux_upper_native),
+           ~ if_else(scale == "30 min", .x * 1000, .x)),
+    flux_unit   = if_else(scale == "30 min", "nmol C m-2 s-1", flux_unit),
+    flux_unit   = superscript_units(flux_unit),
     scale       = factor(scale, levels = scale_levels),
     scale_label = factor(
       paste0(scale, "\n", flux_unit),
-      levels = paste0(scale_levels, "\n", c("umol C m-2 s-1", "mg C m-2 d-1", "g C m-2 yr-1"))
+      levels = paste0(scale_levels, "\n", superscript_units(c("nmol C m-2 s-1", "mg C m-2 d-1", "g C m-2 yr-1")))
     )
   ) %>%
   apply_era5_behavior(drop_cols = "annual_behavior") %>%
@@ -485,7 +541,7 @@ make_flux_magnitude_plot <- function(dat, subtitle_txt) {
 
   dat %>%
     ggplot(aes(x = flux_native, y = SITE_ID_plot, color = annual_behavior, shape = EcoType)) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.35) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.8) +
     geom_errorbar(
       aes(xmin = flux_lower_native, xmax = flux_upper_native),
       orientation = "y", width = 0.18, linewidth = 0.45,
@@ -499,7 +555,7 @@ make_flux_magnitude_plot <- function(dat, subtitle_txt) {
     theme_neon(FIG_BASE_CPLEX) +
     labs(
       x = "Flux magnitude in native units", y = NULL, shape = "Ecosystem type",
-      title    = "NEON CH4 Site Categories And Flux Magnitudes",
+      title    = expression(paste("NEON CH"[4], " Site Categories And Flux Magnitudes")),
       subtitle = subtitle_wrapped
     ) +
     guides(color = "none", shape = guide_legend(override.aes = list(size = 3.7, alpha = 1))) +
@@ -508,8 +564,9 @@ make_flux_magnitude_plot <- function(dat, subtitle_txt) {
       legend.position = "bottom",
       axis.text.y     = element_text(size = 7),
       axis.text.x     = element_text(size = 7),
-      strip.text.x    = element_text(face = "bold", size = 7, lineheight = 0.95),
-      strip.text.y    = element_text(face = "bold", size = 7),
+      strip.background = element_rect(fill = "black", color = NA),
+      strip.text.x    = element_text(face = "bold", size = 7, lineheight = 0.95, color = "white"),
+      strip.text.y    = element_text(face = "bold", size = 7, color = "white"),
       panel.spacing.x = unit(0.45, "lines"),
       panel.spacing.y = unit(0.30, "lines")
     )
@@ -631,7 +688,7 @@ if (era5_files_present) {
   # era5_behavior_lookup already loaded at top of script; annual_behavior in
   # all_site_flux_magnitude_summary is already ERA5-based.
   scale_levels_4 <- c("30 min", "Daily", "Annual", "Annual ERA5")
-  flux_units_4   <- c("umol C m-2 s-1", "mg C m-2 d-1", "g C m-2 yr-1", "g C m-2 yr-1")
+  flux_units_4   <- superscript_units(c("nmol C m-2 s-1", "mg C m-2 d-1", "g C m-2 yr-1", "g C m-2 yr-1"))
 
   # Site order: ERA5 behavior → ERA5 annual flux magnitude
   era5_site_order_4 <- budget_comparison %>%
@@ -646,7 +703,7 @@ if (era5_files_present) {
       EcoType,
       annual_behavior   = factor(era5_annual_behavior, levels = behavior_levels),
       scale             = "Annual ERA5",
-      flux_unit         = "g C m-2 yr-1",
+      flux_unit         = superscript_units("g C m-2 yr-1"),
       flux_native       = mean_era5_gapfilled_annual_budget_gC_m2_yr,
       flux_sd_native    = sd_era5_gapfilled_annual_budget_gC_m2_yr,
       flux_lower_native = flux_native - flux_sd_native,
@@ -672,7 +729,8 @@ if (era5_files_present) {
   )
 
   ggsave("FIGURES/NEON_all_site_category_flux_magnitudes.png",
-         plot_all_site_flux_magnitude, width = FIG_W_FULL, height = FIG_H_TALL, units = "in", dpi = 300)
+         duplicate_top_strip_to_bottom(plot_all_site_flux_magnitude),
+         width = FIG_W_FULL, height = FIG_H_TALL, units = "in", dpi = 300)
   fit_axis_lim <- quantile(
     abs(c(fit_plot_data$CH4_mgC_30min, fit_plot_data$fitted_CH4_mgC_30min)),
     0.995, na.rm = TRUE
@@ -1036,12 +1094,16 @@ if (era5_files_present) {
   }
 
   plot_era5_diel_flux <- era5_diel_smooth %>%
-    ggplot(aes(x = hour_num, y = mean_flux_umolC_m2_s,
+    mutate(
+      mean_flux_nmolC_m2_s = mean_flux_umolC_m2_s * 1000,
+      se_flux_nmolC_m2_s    = se_flux_umolC_m2_s * 1000
+    ) %>%
+    ggplot(aes(x = hour_num, y = mean_flux_nmolC_m2_s,
                color = annual_behavior, fill = annual_behavior)) +
     geom_hline(yintercept = 0, linetype = "dashed", color = "grey55") +
     geom_ribbon(
-      aes(ymin = mean_flux_umolC_m2_s - se_flux_umolC_m2_s,
-          ymax = mean_flux_umolC_m2_s + se_flux_umolC_m2_s),
+      aes(ymin = mean_flux_nmolC_m2_s - se_flux_nmolC_m2_s,
+          ymax = mean_flux_nmolC_m2_s + se_flux_nmolC_m2_s),
       color = NA, alpha = 0.16
     ) +
     geom_line(linewidth = 0.9) +
@@ -1051,7 +1113,7 @@ if (era5_files_present) {
     theme_neon(FIG_BASE) +
     labs(
       x = "Hour of day",
-      y = expression(paste("30-min CH"[4], " flux (", mu, "mol C ", m^-2, " ", s^-1, ")")),
+      y = expression(paste("30-min CH"[4], " flux (nmol C ", m^-2, " ", s^-1, ")")),
       color = "State Class", title = "C. Diel Flux Pattern"
     ) +
     guides(fill = "none", color = guide_legend(nrow = 1, order = 2, override.aes = list(linewidth = 1.2))) +
@@ -1159,7 +1221,8 @@ if (era5_files_present) {
     "Rows: state class. Columns: 30-min standardized, daily lookup-filled, annual scaled. Bars +/- 1 SD."
   )
   ggsave("FIGURES/NEON_all_site_category_flux_magnitudes.png",
-         plot_all_site_flux_magnitude, width = FIG_W_FULL, height = FIG_H_TALL, units = "in", dpi = 300)
+         duplicate_top_strip_to_bottom(plot_all_site_flux_magnitude),
+         width = FIG_W_FULL, height = FIG_H_TALL, units = "in", dpi = 300)
   message("ERA5 output files not found — skipping ERA5 plots. Run NEON.ERA5.HalfHourlyGapfill.R first.")
 }
 
