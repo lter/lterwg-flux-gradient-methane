@@ -102,7 +102,7 @@ pS1a <- probability_calibration_skill %>%
   geom_line(color = "#009688", linewidth = 0.8) +
   coord_equal(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE) +
   scale_size_continuous(range = c(1.5, 5)) +
-  labs(title = "A. Probability Calibration  P(source)",
+  labs(title = "A.",
        x = "Isotonic-calibrated P(source)", y = "Observed source fraction", size = "n months") +
   fig_theme
 
@@ -133,7 +133,7 @@ pS1b <- skill_long %>%
   scale_x_continuous(limits = c(0, 1.15), expand = c(0, 0),
                      breaks = seq(0, 1, by = 0.25)) +
   facet_grid(group ~ ., scales = "free_y", space = "free") +
-  labs(title = "B. Stage 1 Classification Skill",
+  labs(title = "B.",
        x = "Value", y = NULL) +
   fig_theme + theme(legend.position = "none")
 
@@ -144,7 +144,7 @@ pS1c <- rf_class_importance %>%
   mutate(predictor = fct_reorder(predictor, importance)) %>%
   ggplot(aes(x = importance, y = predictor)) +
   geom_col(fill = "#009688", alpha = 0.85) +
-  labs(title = "C. Stage 1 Variable Importance",
+  labs(title = "C. ",
        x = "Permutation importance", y = NULL) +
   fig_theme + theme(legend.position = "none")
 
@@ -175,7 +175,8 @@ make_mag_plot <- function(model_label, panel_tag) {
                 linetype = "dashed", linewidth = 0.5) +
     geom_point(alpha = 0.5, size = 1.5) +
     scale_color_manual(values = ecotype_colors) +
-    labs(title = paste0(panel_tag, ". ", model_label, " model  (n = ", n_obs, ")"),
+    labs(#title = paste0(panel_tag, ". ", model_label, " model  (n = ", n_obs, ")"),
+      title = paste0(panel_tag),
          x = "Observed (g C m⁻² mo⁻¹)",
          y = "Fitted (g C m⁻² mo⁻¹, OOB)",
          color = NULL) +
@@ -204,3 +205,4 @@ ggsave(file.path(figure_dir, "Fig2_magnitude_model_fit.png"),
 message("Fig 2 (magnitude model fit) written.")
 
 message("Model-performance figures written to: ", figure_dir)
+

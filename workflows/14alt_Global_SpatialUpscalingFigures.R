@@ -272,7 +272,7 @@ p1a <- mcp %>%
              linetype = "dotted", linewidth = 0.8) +
   scale_fill_manual(values  = ecotype_colors) +
   scale_color_manual(values = ecotype_colors) +
-  labs(title = "A. P(source) by Ecosystem Type",
+  labs(title = "A.",
        x = "Mean P(source)", y = "Density",
        fill = NULL, color = NULL) +
   fig_theme +
@@ -286,7 +286,7 @@ p1b <- annual_cell_class_2025 %>%
   geom_tile(width = res(template)[1], height = res(template)[2]) +
   coord_equal(expand = FALSE) +
   prob_scale +
-  labs(title = "B. Continuous P(source), 2025", x = "Longitude", y = "Latitude") +
+  labs(title = "B.", x = "Longitude", y = "Latitude") +
   map_theme +
   theme(legend.position   = c(0.08, 0.28),
         legend.direction  = "vertical",

@@ -716,7 +716,7 @@ pA <- combined_importance %>%
   geom_col(width = 0.65, show.legend = FALSE) +
   scale_fill_manual(values = c(`TRUE` = "grey45", `FALSE` = unname(dist_colors["NEON site-months"]))) +
   coord_flip() +
-  labs(title = "A. Combined RF variable importance",
+  labs(title = "A.",
        x = NULL, y = "Normalized weight (P(source) + magnitude models)") +
   fig_theme
 
@@ -790,7 +790,7 @@ legend_b     <- get_legend(dist_panels[[1]] + theme(legend.position = "top",
 dist_panels  <- map(dist_panels, ~ . + theme(legend.position = "none"))
 
 pB <- plot_grid(
-  ggdraw() + draw_label("C. Predictor coverage: NEON training data vs. global upland grid",
+  ggdraw() + draw_label("C. ",
                          fontface = "bold", size = 12, x = 0.01, hjust = 0),
   legend_b,
   plot_grid(plotlist = dist_panels, ncol = 3),
@@ -805,7 +805,7 @@ pC <- map_df %>%
   geom_tile(width = res(template)[1], height = res(template)[2]) +
   coord_equal(expand = FALSE) +
   scale_fill_manual(values = aoa_colors, name = NULL) +
-  labs(title = "D. Area of Applicability, representative year",
+  labs(title = "D.",
        x = "Longitude", y = "Latitude") +
   fig_theme + theme(panel.grid = element_blank(), legend.position = "bottom") +
   geom_label(data = overall_summary,
@@ -834,7 +834,7 @@ pD <- ecotype_pct %>%
             inherit.aes = FALSE, vjust = -0.4, size = 3.4, fontface = "bold") +
   scale_y_continuous(limits = c(0, 108), breaks = c(0, 25, 50, 75, 100)) +
   scale_fill_manual(values = aoa_colors, name = NULL) +
-  labs(title = "B. Upland area represented by Ecosystem Type", x = "Ecosystem Type", y = "% of Ecosystem Type area") +
+  labs(title = "B. ", x = "Ecosystem Type", y = "% of Ecosystem Type area") +
   fig_theme + theme(legend.position = "none")
 
 # Physical layout: A next to pD (printed "B"), then pB (printed "C"), then

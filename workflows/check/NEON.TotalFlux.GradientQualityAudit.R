@@ -487,7 +487,7 @@ cross_flag_plot <- cross_gradient_summary %>%
   theme_bw(base_size = 11) +
   labs(
     x = NULL,
-    y = "Retained rows with positive FG",
+    y = "Retained rows with positive GF",
     fill = "Cross-gradient flag",
     title = "Retained CH4 source fraction by cross-gradient flag"
   ) +
@@ -528,7 +528,7 @@ filter_bias_plot <- filter_bias_plot_data %>%
     y = "Rows with negative dConc",
     fill = NULL,
     title = "Does dConc filtering preferentially retain source-like gradients?",
-    subtitle = "Negative dConc corresponds to upward-positive/source-like FG for A-above-B pairs."
+    subtitle = "Negative dConc corresponds to upward-positive/source-like GF for A-above-B pairs."
   ) +
   theme(plot.title = element_text(face = "bold"), legend.position = "bottom")
 
@@ -553,7 +553,7 @@ top_pair_plot <- sensor_pair_summary %>%
   theme_bw(base_size = 9) +
   labs(
     x = NULL,
-    y = "Retained rows with positive FG",
+    y = "Retained rows with positive GF",
     fill = "Flagged",
     title = "Dominant retained sensor-pair behavior"
   ) +
@@ -586,8 +586,8 @@ cross_lines <- cross_gradient_summary %>%
   mutate(
     line = paste0(
       "- ", Approach, " / ", cross_grad_class, ": n = ", n,
-      ", positive FG = ", round(100 * prop_positive_FG, 1), "%",
-      ", median FG = ", signif(median_FG, 3),
+      ", positive GF = ", round(100 * prop_positive_FG, 1), "%",
+      ", median GF = ", signif(median_FG, 3),
       ", sites = ", n_sites
     )
   ) %>%

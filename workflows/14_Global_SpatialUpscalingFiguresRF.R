@@ -109,6 +109,7 @@ recode_approach <- function(df) {
 annual_budget     <- read.csv(file.path(output_dir, "annual_budget_three_approaches.csv")) %>% recode_approach()
 annual_budget_long <- read.csv(file.path(output_dir, "annual_budget_long.csv")) %>% recode_approach()
 budget_summary    <- read.csv(file.path(output_dir, "budget_summary_three_approaches.csv")) %>% recode_approach()
+
 comparison_budget <- read.csv(file.path(output_dir, "comparison_budget_all_approaches.csv")) %>% recode_approach()
 if (!exists("gmb_sensitivity"))
   gmb_sensitivity <- read.csv(file.path(output_dir, "gmb_threshold_sensitivity.csv"))
@@ -332,7 +333,7 @@ p1a <- cp %>%
   geom_vline(xintercept = 0.5, color = "grey30", linetype = "dotted", linewidth = 0.8) +
   scale_fill_manual(values  = ecotype_colors) +
   scale_color_manual(values = ecotype_colors) +
-  labs(title = "B. P(source) by Ecosystem Type",
+  labs(title = "B.",
        x = "Mean P(source)", y = "Density", fill = NULL, color = NULL) +
   fig_theme +
   theme(legend.position   = c(0.18, 0.75),
@@ -394,7 +395,7 @@ p1b <- annual_cell_A_2025 %>%
   coord_equal(xlim = c(lon_range[1], margin_x1), ylim = lat_range, expand = FALSE) +
   scale_x_continuous(breaks = pretty(lon_range, n = 5)) +
   prob_scale +
-  labs(title = "A. Annual Mean P(source), 2025",
+  labs(title = "A.",
        x = "Longitude", y = "Latitude") +
   map_theme +
   theme(legend.position   = c(0.045, 0.28),
@@ -421,7 +422,7 @@ p1c_base <- class_map_df %>%
   coord_equal(expand = FALSE) +
   scale_fill_manual(values   = c("Weak-sink" = sink_col, "Weak-source" = source_col),
                     na.value = "transparent") +
-  labs(title = "D. Annual Exchange Class, 2025  (P(source) ≥ 0.5)",
+  labs(title = "D.",
        x = "Longitude", y = "Latitude", fill = NULL) +
   map_theme +
   # Legend embedded inside the panel (in the open ocean south of Africa)
@@ -440,7 +441,7 @@ p1d <- annual_source_area %>%
   geom_line(linewidth = 0.9) + geom_point(size = 1.6) +
   scale_x_continuous(breaks = seq(2000, 2025, by = 5)) +
   scale_color_manual(values = c("Weak-sink" = sink_col, "Weak-source" = source_col)) +
-  labs(title = "E. Source/Sink Area, 2000–2025",
+  labs(title = "E.",
        x = "Year", y = "Area (100 Mha)", color = NULL) +
   fig_theme
 
@@ -489,7 +490,7 @@ p1e <- lat_gradient_data %>%
   scale_x_continuous(breaks = seq(-90, 90, by = 30)) +
   scale_color_manual(values = ecotype_colors) +
   scale_fill_manual(values = ecotype_colors) +
-  labs(title = "C. Latitudinal Gradient of P(source)",
+  labs(title = "C.",
        x = "Latitude (°)", y = "Mean P(source)", color = NULL, fill = NULL) +
   fig_theme + theme(legend.position = "none")
 
@@ -510,7 +511,7 @@ fig1 <- plot_grid(
 
 # 7.5 x 9.5 in fits within a standard manuscript page (single full-width
 # figure, letter/A4 with margins) at 300 dpi.
-ggsave(file.path(figure_dir, "Fig1_source_probability.png"),
+ggsave(file.path(figure_dir, "FIGURE4_source_probability.png"),
   fig1, width = 7.5, height = 9.5, units = "in", dpi = 300, bg = "white")
 message("Fig 1 written.")
 
@@ -535,7 +536,7 @@ p2c <- flux_seasonal %>%
                "Constrained" = "All-Sink")
   ) +
   facet_wrap(~EcoType_plot, scales = "free_y", ncol = 2) +
-  labs(title = "Seasonal Flux Cycle by Ecosystem Type",
+  labs(title = "",
        x = "Month", y = "Flux (g C m⁻² mo⁻¹)",
        color = NULL, linetype = "Approach") +
   fig_theme + guides(color = "none")
@@ -578,7 +579,7 @@ if (file.exists(magnitude_fitted_values_file)) {
                   linetype = "dashed", linewidth = 0.5) +
       geom_point(alpha = 0.5, size = 1.5) +
       scale_color_manual(values = ecotype_colors) +
-      labs(title = paste0(panel_tag, ". ", model_label, " model  (n = ", n_obs, ")"),
+      labs(title = paste0(panel_tag),
            x = "Observed (g C m⁻² mo⁻¹)",
            y = "Fitted (g C m⁻² mo⁻¹, OOB)",
            color = NULL) +
@@ -605,7 +606,7 @@ if (file.exists(magnitude_fitted_values_file)) {
     ncol = 1, rel_heights = c(0.07, 1, 1.4)
   )
 
-  ggsave(file.path(figure_dir, "Fig2_magnitude_models.png"),
+  ggsave(file.path(figure_dir, "FIGURE5_magnitude_models.png"),
     fig2_combined, width = 8.0, height = 8.0, units = "in", dpi = 300, bg = "white")
   message("Fig 2 (original combined magnitude_models layout) written.")
 
@@ -634,7 +635,7 @@ p3a <- comparison_budget %>%
   annotate("text", x = -Inf, y = gmb_soil_sink_tg_ch4_yr - 1.5,
            label = "GMB (−35)", hjust = 0, size = 3.0, color = gmb_col) +
   scale_fill_manual(values = approach_colors) +
-  labs(title = "A. Mean Annual Budget (2000–2025)",
+  labs(title = "A.",
        x = NULL, y = "Net exchange (Tg CH₄ yr⁻¹)") +
   coord_flip() +
   fig_theme
@@ -652,7 +653,7 @@ p3b <- annual_budget_long %>%
   annotate("text", x = 2001, y = gmb_soil_sink_tg_ch4_yr + 1.8,
            label = "GMB reference (−35 Tg yr⁻¹)",
            hjust = 0, size = 3.0, color = gmb_col) +
-  labs(title = "B. Annual Net Exchange, 2000–2025",
+  labs(title = "B. ",
        x = "Year", y = "Net exchange (Tg CH₄ yr⁻¹)", color = NULL) +
   fig_theme + theme(legend.position = "none")
 
@@ -678,7 +679,7 @@ p3c <- gmb_sensitivity %>%
     )
   } +
   scale_x_continuous(breaks = seq(0.3, 1.0, by = 0.1)) +
-  labs(title = "C. Threshold Sensitivity  P(source)",
+  labs(title = "C.",
        x = "P(source) threshold",
        y = "Mean annual budget (Tg CH₄ yr⁻¹)") +
   fig_theme
@@ -698,25 +699,25 @@ message("Fig 3 written.")
 
 p4a <- make_flux_map(
   cell_flux_2025, "annual_continuous_gC_m2_yr",
-  "A. Annual Net Flux, 2025  —  Continuous  (P(source))",
+  "A. ",
   flux_map_abs_max
 )
 
 p4b <- make_flux_map(
   cell_flux_2025, "annual_balanced_gC_m2_yr",
-  "B. Annual Net Flux, 2025  —  Dichotomous  (P(source) ≥ 0.5)",
+  "B.",
   flux_map_abs_max
 )
 
 p4c <- make_flux_map(
   cell_flux_2025, "annual_constrained_gC_m2_yr",
-  "C. Annual Net Flux, 2025  —  All-Sink  (all upland cells → sink flux)",
+  "C. ",
   flux_map_abs_max
 )
 
 fig4 <- plot_grid(p4a, p4b, p4c, ncol = 1)
 
-ggsave(file.path(figure_dir, "Fig4_spatial_maps.png"),
+ggsave(file.path(figure_dir, "FIGURE6_spatial_maps.png"),
   fig4, width = 9.0, height = 9.5, units = "in", dpi = 300, bg = "white")
 message("Fig 4 written.")
 
@@ -729,3 +730,4 @@ ggsave(file.path(figure_dir, "annual_budget_time_series_2000_2025.png"),
   width = 7.0, height = 3.5, units = "in", dpi = 300, bg = "white")
 
 message("All RF figures written to: ", figure_dir)
+

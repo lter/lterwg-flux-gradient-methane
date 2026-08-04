@@ -176,8 +176,8 @@ pA <- ggplot(pA_data, aes(x = canopy_m, y = storage_pct)) +
                            r2_a, p_a, net_median_storage_pct),
            hjust = 0, size = 2.6, color = "grey35") +
   labs(
-    title    = "A.  Within-canopy storage vs. canopy height",
-    subtitle = "Storage fraction = |storage term| / |total flux| (30-min median per site)",
+    title    = "A.",#  Within-canopy storage vs. canopy height",
+    #subtitle = "Storage fraction = |storage term| / |total flux| (30-min median per site)",
     x        = "Canopy height (m)",
     y        = "Median |storage| / |total flux| (%)"
   ) +
@@ -242,8 +242,8 @@ pB <- ggplot(pB_data,
                            r_b, n_B - n_changed, n_B),
            hjust = 0, size = 2.6, color = "grey35") +
   labs(
-    title    = "B.  Total vs. gradient-only site-mean flux",
-    subtitle = "All 46 sites on 1:1 line; storage term does not change exchange class",
+    title    = "B.", #  Total vs. gradient-only site-mean flux",
+    #subtitle = "All 46 sites on 1:1 line; storage term does not change exchange class",
     x        = expression("Mean gradient flux (mg C m"^{-2}~"30min"^{-1}~")"),
     y        = expression("Mean total flux (mg C m"^{-2}~"30min"^{-1}~")")
   ) +
@@ -290,8 +290,8 @@ pC <- ggplot(qq_inner, aes(x = obs_q, y = pred_q)) +
              oob_bias, 100 * oob_sign, oob_r2),
            hjust = 0, size = 2.4, color = "grey30") +
   labs(
-    title    = "C.  OOB predicted vs. observed flux quantiles (p5 - p95)",
-    subtitle = "S-shape = symmetric variance compression; mean bias ~ 0",
+    title    = "C.", #  OOB predicted vs. observed flux quantiles (p5 - p95)",
+   # subtitle = "S-shape = symmetric variance compression; mean bias ~ 0",
     x        = expression("Observed quantile (mg C m"^{-2}~"30min"^{-1}~")"),
     y        = expression("OOB predicted quantile (mg C m"^{-2}~"30min"^{-1}~")")
   ) +
@@ -335,8 +335,8 @@ pD <- ggplot(stab_summary,
                     limits = stab_order) +
   scale_y_continuous(breaks = seq(0, 50, 10)) +
   labs(
-    title    = "D.  Annual budget sign stability (bootstrap)",
-    subtitle = "Gap-fill variance rarely flips annual source/sink classification",
+    title    = "D.",#  Annual budget sign stability (bootstrap)",
+  #  subtitle = "Gap-fill variance rarely flips annual source/sink classification",
     x        = NULL,
     y        = "Number of NEON sites"
   ) +
@@ -457,3 +457,4 @@ cat(sprintf(
   sum(sign_stab$sign_sensitivity_class %in% c("Stable sink","Stable source"))
 ))
 cat(strrep("=", 64), "\n")
+

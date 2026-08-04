@@ -216,7 +216,7 @@ pA <- ggplot(class_long,
            label = "Baseline source count",
            size = 2.8, color = "grey30", hjust = 1) +
   labs(
-    title = "A. Network classification at each flux scaling",
+    title = "A.",
     x     = "Flux scale factor",
     y     = "Number of NEON sites"
   ) +
@@ -231,7 +231,7 @@ pB <- sensitivity_site %>%
                width = 0.55, color = "grey30", alpha = 0.75) +
   scale_fill_manual(values = behavior_colors, name = "Baseline class") +
   labs(
-    title = "B. Annual CH₄ budget distribution by flux scaling",
+    title = "B. ",
     x     = "Flux scale factor",
     y     = expression(Mean~annual~budget~(gC~m^{-2}~yr^{-1}))
   ) +
@@ -252,7 +252,7 @@ pC <- sign_stability %>%
                      labels = function(x) paste0(x, "%")) +
   geom_hline(yintercept = 100, linetype = "dotted", color = "grey60") +
   labs(
-    title = "C. Baseline Weak-source sites retaining source classification",
+    title = "C.",
     x     = "Flux scale factor",
     y     = "% retaining source status"
   ) +
@@ -277,7 +277,7 @@ pD <- sensitivity_site %>%
     limits   = function(x) c(-max(abs(x), na.rm = TRUE), max(abs(x), na.rm = TRUE))
   ) +
   labs(
-    title = "D. Site-level mean annual budget at each flux scaling",
+    title = "D. ",
     x     = "Flux scale factor",
     y     = "NEON site"
   ) +
@@ -290,14 +290,15 @@ pD <- sensitivity_site %>%
 # ── Assemble and save ─────────────────────────────────────────────────────────
 fig_uncertainty <- (pA | pB) / (pC | pD) +
   plot_annotation(
-    title   = "Flux-magnitude sensitivity: source/sink classification under systematic scaling",
-    caption = paste(strwrap(paste(
-      "All ERA5 half-hourly gapfilled CH₄ fluxes multiplied by each scale factor.",
-      "A: Network-level classification count. B: Annual budget distributions;",
-      "dashed line = zero. C: Fraction of baseline Weak-source sites (n labelled)",
-      "that retain source status. D: Per-site mean annual budget; blue = sink, red = source.",
-      "Dashed line in A marks baseline (1.0×) source count."),
-      width = 110), collapse = "\n"),
+    #title   = "Flux-magnitude sensitivity: source/sink classification under systematic scaling",
+    #caption = paste(strwrap(paste(
+    #  "All ERA5 half-hourly gapfilled CH₄ fluxes multiplied by each scale factor.",
+    #  "A: Network-level classification count. B: Annual budget distributions;",
+    #  "dashed line = zero. C: Fraction of baseline Weak-source sites (n labelled)",
+    #  "that retain source status. D: Per-site mean annual budget; blue = sink, red = source.",
+    #  "Dashed line in A marks baseline (1.0×) source count."),
+    #  width = 110), collapse = "\n"),
+    
     theme = theme(
       plot.title   = element_text(size = 11, face = "bold"),
       plot.caption = element_text(size = 7.5, hjust = 0, color = "grey30")
@@ -356,3 +357,4 @@ the network.",
   n_source_h, n_retain_h, n_base_src, pct_h,
   med_1, med_h), width = 90), collapse = "\n"))
 cat("\n")
+

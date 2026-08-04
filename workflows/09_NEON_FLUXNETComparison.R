@@ -1159,7 +1159,7 @@ comparison_figure <- ggplot() +
   ) +
   scale_y_discrete(limits = rev(source_row_levels), drop = FALSE) +
   labs(
-    title = expression(bold("ERA5-gapfilled NEON gradient CH"[4]*" fluxes vs. published benchmarks")),
+  #  title = expression(bold("ERA5-gapfilled NEON gradient CH"[4]*" fluxes vs. published benchmarks")),
     x = expression("Daily CH"[4] * " flux (mg C m"^-2 * " d"^-1 * "; pseudo-log scale)"),
     y = NULL
   ) +
@@ -1350,7 +1350,7 @@ flux_density_figure <- ggplot(density_plot_data, aes(x = flux, fill = group, col
     panel.grid.minor = element_blank()
   ) +
   labs(
-    title = expression(bold("Upland CH"[4]*" flux distributions: towers vs chambers")),
+   # title = expression(bold("Upland CH"[4]*" flux distributions: towers vs chambers")),
     x     = expression("Daily CH"[4] * " flux (mg C m"^-2 * " d"^-1 * "; pseudo-log scale)"),
     y     = "Density"
   )
@@ -1391,7 +1391,7 @@ combined_figure <- (
   )
 
 ggsave(
-  "FIGURES/NEON_FLUXNET_CH4_flux_combined.png",
+  "FIGURES/FIGURE3_NEON_FLUXNET_CH4_flux_combined.png",
   plot   = combined_figure,
   width  = 10,
   height = 12,
@@ -1441,6 +1441,6 @@ combined_figure_caption <- paste0(
 )
 writeLines(
   strwrap(combined_figure_caption, width = 100),
-  "FIGURES/NEON_FLUXNET_CH4_flux_combined_caption.txt"
+  "FIGURES/FIGURE3_NEON_FLUXNET_CH4_flux_combined_caption.txt"
 )
 message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_combined_caption.txt")

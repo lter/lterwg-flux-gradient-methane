@@ -287,10 +287,10 @@ sign_plot <- sign_audit_overall %>%
   theme_bw(base_size = 11) +
   labs(
     x = NULL,
-    y = "Rows where sign(FG_mean) is opposite sign(dConc)",
+    y = "Rows where sign(GF_mean) is opposite sign(dConc)",
     fill = "Tower order",
     title = "CH4 gradient-flux sign audit",
-    subtitle = "For F = -K dC/dz, A above B should produce sign(FG) opposite sign(concentration_A - concentration_B)."
+    subtitle = "For F = -K dC/dz, A above B should produce sign(GF) opposite sign(concentration_A - concentration_B)."
   ) +
   theme(
     plot.title = element_text(face = "bold"),
@@ -312,7 +312,7 @@ overall_lines <- sign_audit_overall %>%
       "- ", Approach, " / ", tower_order, ": n = ", n,
       ", opposite sign = ", round(100 * prop_FG_opposite_dConc, 1), "%",
       ", same sign = ", round(100 * prop_FG_same_as_dConc, 1), "%",
-      ", median FG = ", signif(median_FG, 3),
+      ", median GF = ", signif(median_FG, 3),
       ", median dConc = ", signif(median_dConc, 3)
     )
   ) %>%

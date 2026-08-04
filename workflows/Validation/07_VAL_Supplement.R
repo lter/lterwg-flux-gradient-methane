@@ -137,20 +137,9 @@ make_tower_panel <- function(site, meta, rshp_pairs_site) {
 
 tower_plots <- imap(site_meta, ~ make_tower_panel(.y, .x, rshp_selected[[.y]]))
 
-fig1 <- wrap_plots(tower_plots, nrow = 1) +
-  plot_annotation(
-    title   = "Measurement height configurations at validation towers",
-    caption = paste(strwrap(paste(
-      "Green shading = canopy zone (0 to h_c). Open circles = concentration sensor levels",
-      "(green = within canopy, blue = above canopy). Diamond = EC flux measurement height.",
-      "Grey segments = candidate RSHP height pairs after canopy-structure filtering."),
-      width = 100), collapse = "\n"),
-    theme   = theme(plot.title   = element_text(size = 11, face = "bold"),
-                    plot.caption = element_text(size = 8, hjust = 0))
-  )
-
+fig1 <- wrap_plots(tower_plots, nrow = 1) 
 ggsave(fs::path(figure_dir, "ValSupp_Fig1_TowerProfiles.png"),
-       fig1, width = 7.5, height = 5.5, dpi = 300)
+       fig1, width = 7, height = 3, dpi = 300)
 
 message("Saved ValSupp_Fig1_TowerProfiles.png")
 
@@ -196,15 +185,9 @@ fig2 <- ggplot(ccc_plot,
   scale_shape_manual(values = c(AE = 16, MBR = 17, WP = 15), name = "Approach") +
   scale_x_continuous(limits = c(-0.2, 0.45), breaks = c(-0.1, 0, 0.1, 0.3)) +
   labs(
-    title   = "Concordance correlation coefficients for candidate height pairs",
+   # title   = "Concordance correlation coefficients for candidate height pairs",
     x       = "Concordance Correlation Coefficient (CCC)",
-    y       = "Height pair (upper_lower level)",
-    caption = paste(strwrap(paste(
-      "Dashed line: CCC = 0.1 (Tier-1 'standard' threshold).",
-      "Solid line: CCC = 0. Pairs not reaching Tier-1 in a given season",
-      "fall to Tier-2 (best_avail) or Tier-3 (unreliable)."),
-      width = 100), collapse = "\n")
-  ) +
+    y       = "Height pair (upper_lower level)") +
   theme_bw(base_size = 10) +
   theme(legend.position  = "right",
         strip.text.y     = element_text(angle = 0, size = 8),
@@ -214,7 +197,7 @@ fig2 <- ggplot(ccc_plot,
         plot.caption     = element_text(size = 8, hjust = 0))
 
 ggsave(fs::path(figure_dir, "ValSupp_Fig2_CCC.png"),
-       fig2, width = 7.5, height = 6.5, dpi = 300)
+       fig2, width = 7.5, height = 4, dpi = 300)
 
 message("Saved ValSupp_Fig2_CCC.png")
 
@@ -259,7 +242,7 @@ scatter_list <- imap(site_meta, function(meta, site) {
     coord_cartesian(xlim = lim, ylim = lim) +
     labs(title = meta$label,
          x = expression(EC~flux~(mgC~m^{-2}~per~30~min)),
-         y = expression(FG~flux~(mgC~m^{-2}~per~30~min))) +
+         y = expression(GF~flux~(mgC~m^{-2}~per~30~min))) +
     theme_bw(base_size = 10) +
     theme(legend.position = "bottom",
           plot.title      = element_text(size = 9, face = "bold"))
@@ -268,19 +251,10 @@ scatter_list <- imap(site_meta, function(meta, site) {
 fig3 <- wrap_plots(scatter_list, nrow = 1, guides = "collect") &
   theme(legend.position = "bottom")
 
-fig3 <- fig3 +
-  plot_annotation(
-    title   = "Half-hourly flux-gradient vs eddy covariance CH₄ fluxes",
-    caption = paste(strwrap(paste(
-      "Each point = one 30-min median FG (across RSHP-selected pairs) vs concurrent EC flux.",
-      "Dashed line = 1:1. Solid line = OLS regression. Units: mgC m⁻² per 30 min."),
-      width = 100), collapse = "\n"),
-    theme   = theme(plot.title   = element_text(size = 11, face = "bold"),
-                    plot.caption = element_text(size = 8, hjust = 0))
-  )
+fig3 <- fig3 
 
 ggsave(fs::path(figure_dir, "ValSupp_Fig3_FGvsEC.png"),
-       fig3, width = 7.5, height = 4.5, dpi = 300)
+       fig3, width = 7.5, height = 3, dpi = 300)
 
 message("Saved ValSupp_Fig3_FGvsEC.png")
 
@@ -325,8 +299,8 @@ p_ratio <- ggplot(seasonal_summary,
   scale_y_continuous(trans  = "log10",
                      breaks = c(0.5, 1, 2, 5, 10, 20),
                      labels = c("0.5","1","2","5","10","20")) +
-  labs(y = "FG / EC ratio (log scale)", x = NULL,
-       title = "FG over-estimation relative to EC by season") +
+  labs(y = "GF / EC ratio (log scale)", x = NULL,
+       title = "A") +
   theme_bw(base_size = 10) +
   theme(strip.text   = element_text(size = 9, face = "bold"),
         plot.title   = element_text(size = 10, face = "bold"),
@@ -346,7 +320,7 @@ annual_summary <- imap_dfr(site_meta, function(meta, site) {
 }) %>%
   pivot_longer(c(FG_ann, EC_ann), names_to = "Method",
                values_to = "Annual_mgC") %>%
-  mutate(Method = recode(Method, FG_ann = "Flux-gradient", EC_ann = "Eddy covariance"),
+  mutate(Method = recode(Method, FG_ann = "Gradient-flux", EC_ann = "Eddy covariance"),
          Site   = factor(Site, levels = c("SE-Sto","SE-Svb","US-Uaf"),
                          labels = c("SE-Sto\n(mire)",
                                     "SE-Svb\n(tall forest)",
@@ -359,28 +333,18 @@ p_annual <- ggplot(annual_summary,
             vjust = -0.4, size = 2.8) +
   facet_wrap(~ Site, nrow = 1, scales = "free_y") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  scale_fill_manual(values = c("Flux-gradient"    = "#4292C6",
+  scale_fill_manual(values = c("Gradient-flux"    = "#4292C6",
                                 "Eddy covariance" = "#41AB5D"),
                     guide = "none") +
   labs(y = expression(Annual~CH[4]~budget~(mgC~m^{-2}~yr^{-1})),
        x = NULL,
-       title = "Scaled-annual CH₄ budget: flux-gradient vs eddy covariance") +
+       title = "B") +
   theme_bw(base_size = 10) +
   theme(strip.text  = element_text(size = 9, face = "bold"),
         plot.title  = element_text(size = 10, face = "bold"),
         axis.text.x = element_text(angle = 20, hjust = 1))
 
-fig4 <- p_ratio / p_annual +
-  plot_annotation(
-    title   = "Seasonal FG/EC ratio and scaled-annual CH₄ budget comparison",
-    caption = paste(strwrap(paste(
-      "Top: ratio of mean FG to mean EC flux by season (log scale); dashed line = 1:1.",
-      "Bottom: scaled-annual budget derived from mean 30-min flux × 48 × 365.",
-      "Budgets are representative of sampled periods only (not gap-filled)."),
-      width = 100), collapse = "\n"),
-    theme   = theme(plot.title   = element_text(size = 11, face = "bold"),
-                    plot.caption = element_text(size = 8, hjust = 0))
-  )
+fig4 <- p_ratio / p_annual 
 
 ggsave(fs::path(figure_dir, "ValSupp_Fig4_Annual.png"),
        fig4, width = 7.5, height = 7.0, dpi = 300)

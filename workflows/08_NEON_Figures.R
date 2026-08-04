@@ -1,4 +1,5 @@
-# NEON CH4 Flux — Plotting Script
+# NEON CH4 Flux — Plotting Script 
+# Author (SLM)
 #
 # Run AFTER the three analysis scripts in this order:
 #   1. flow.30min.analysis.R
@@ -16,8 +17,7 @@ library(ggpubr)
 
 localdir.ch4 <- Sys.getenv(
   "LOCALDIR_CH4",
-  unset = "/Volumes/MaloneLab/Research/FluxGradient/Methane"
-)
+  unset = "/Volumes/MaloneLab/Research/FluxGradient/Methane")
 setwd(localdir.ch4)
 dir.create("FIGURES", showWarnings = FALSE, recursive = TRUE)
 
@@ -145,10 +145,10 @@ superscript_units <- function(x) {
 # ── Load CSVs ─────────────────────────────────────────────────────────────────
 
 # ── ERA5 behavior lookup (loaded first; used to reclassify all figures) ────────
-# If the ERA5 budget comparison exists, all behavior classifications in every
-# figure will use era5_annual_behavior.  Falls back to lookup-fill behavior
-# if the ERA5 script has not yet been run.
-era5_behavior_file <- "OUTPUT/NEON_ERA5_vs_model_standardized_budget_comparison.csv"
+# Authoritative ERA5 annual budget classification (sink/source/fluctuating).
+# Every figure reclassifies sites through this lookup so all labels are ERA5-based.
+# Falls back to lookup-fill behavior if the ERA5 budget script has not been run.
+era5_behavior_file <- "OUTPUT/NEON_scale_ERA5_annual_budget_summary.csv"
 if (file.exists(era5_behavior_file)) {
   era5_behavior_lookup <- read.csv(era5_behavior_file) %>%
     transmute(
@@ -555,7 +555,7 @@ make_flux_magnitude_plot <- function(dat, subtitle_txt) {
     theme_neon(FIG_BASE_CPLEX) +
     labs(
       x = "Flux magnitude in native units", y = NULL, shape = "Ecosystem type",
-      title    = expression(paste("NEON CH"[4], " Site Categories And Flux Magnitudes")),
+      #title    = expression(paste("NEON CH"[4], " Site Categories And Flux Magnitudes")),
       subtitle = subtitle_wrapped
     ) +
     guides(color = "none", shape = guide_legend(override.aes = list(size = 3.7, alpha = 1))) +
@@ -622,8 +622,8 @@ plot_daily_fill_source_frequency <- daily_fill_source_summary %>%
   theme_neon(FIG_BASE) +
   labs(
     x = "Half-hour slots used in daily flux calculation", y = NULL,
-    title    = "Frequency Of Data Sources Used For Daily CH4 Gap Filling",
-    subtitle = "Observed half-hour fluxes are used first; missing slots are filled by increasingly broad site-specific lookup means."
+    #title    = "Frequency Of Data Sources Used For Daily CH4 Gap Filling",
+    #subtitle = "Observed half-hour fluxes are used first; missing slots are filled by increasingly broad site-specific lookup means."
   ) +
   guides(fill = "none") +
   theme(plot.title = element_text(face = "bold"), axis.text.y = element_text(size = 9))
@@ -640,7 +640,12 @@ plot_daily_fill_source_by_site <- daily_fill_source_by_site %>%
   ) %>%
   ggplot(aes(x = SITE_ID_plot, y = pct_halfhour_slots, fill = fill_source)) +
   geom_col(width = 0.78, color = NA) +
-  facet_grid(~ annual_behavior, scales = "free_x", space = "free_x") +
+  facet_grid(
+    ~ annual_behavior, scales = "free_x", space = "free_x",
+    labeller = labeller(annual_behavior = c(
+      "Weak-sink" = "Weak-sink", "Fluctuating" = "F", "Weak-source" = "Weak-source"
+    ))
+  ) +
   scale_fill_manual(
     values = fill_source_colors, breaks = fill_source_levels,
     labels = fill_source_labels, drop = FALSE, na.translate = FALSE
@@ -649,8 +654,8 @@ plot_daily_fill_source_by_site <- daily_fill_source_by_site %>%
   theme_neon(FIG_BASE_CPLEX) +
   labs(
     x = NULL, y = "Half-hour slots", fill = "Data source",
-    title    = "Daily Gap-Fill Data Sources By Site",
-    subtitle = "Bars show the fraction of site-date half-hour slots that were observed or filled from each lookup level."
+    #title    = "Daily Gap-Fill Data Sources By Site",
+    #subtitle = "Bars show the fraction of site-date half-hour slots that were observed or filled from each lookup level."
   ) +
   theme(
     plot.title      = element_text(face = "bold"),
@@ -664,7 +669,7 @@ plot_daily_fill_source_by_site <- daily_fill_source_by_site %>%
 plot_daily_fill_source_panel <- plot_daily_fill_source_frequency / plot_daily_fill_source_by_site +
   plot_layout(heights = c(0.85, 1.15))
 
-ggsave("FIGURES/NEON_daily_gapfill_source_frequency.png", plot_daily_fill_source_panel, width = FIG_W_FULL, height = FIG_H_TALL, units = "in", dpi = 300)
+ggsave("FIGURES/NEON_daily_gapfill_source_frequency.png", plot_daily_fill_source_panel, width = 9.0, height = 11.0, units = "in", dpi = 300)
 
 plot_daily_distribution <- daily_flux %>%
   ggplot(aes(x = daily_mgC_m2_day, y = fct_reorder(SITE_ID, daily_mgC_m2_day, median, .na_rm = TRUE))) +
@@ -725,7 +730,7 @@ if (era5_files_present) {
 
   plot_all_site_flux_magnitude <- make_flux_magnitude_plot(
     all_site_flux_magnitude_4,
-    "Rows: state class. Columns: 30-min standardized, daily lookup-filled, annual scaled, annual ERA5 gapfilled. Bars +/- 1 SD."
+    ""
   )
 
   ggsave("FIGURES/NEON_all_site_category_flux_magnitudes.png",
@@ -863,20 +868,20 @@ if (era5_files_present) {
     scale_color_manual(values = behavior_colors, na.translate = FALSE) +
     coord_cartesian(xlim = c(-axis_lim, axis_lim), ylim = c(-axis_lim, axis_lim)) +
     labs(
-      title    = paste(strwrap(
-        "ERA5 Half-Hour Gapfilled vs LUT Annual Budget",
-        width = 45), collapse = "\n"),
-      subtitle = paste0("Spearman rho = ", signif(comparison_cor, 3),
-                        "; RMSE = ", signif(comparison_rmse, 3), " g C m⁻² yr⁻¹",
-                        "\nSign agrees: ",
-                        sum(budget_comparison$sign_agree, na.rm = TRUE), " of ",
-                        nrow(budget_comparison), " sites"),
-      x       = expression(paste("LUT balanced (g C ", m^-2, " yr"^-1, ")")),
+    #  title    = paste(strwrap(
+    #    "",
+    #    width = 45), collapse = "\n"),
+     # subtitle = paste0("Spearman rho = ", signif(comparison_cor, 3),
+     #                   "; RMSE = ", signif(comparison_rmse, 3), " g C m⁻² yr⁻¹",
+     #                   "\nSign agrees: ",
+     #                   sum(budget_comparison$sign_agree, na.rm = TRUE), " of ",
+    #                    nrow(budget_comparison), " sites"),
+      x       = expression(paste("Balanced (g C ", m^-2, " yr"^-1, ")")),
       y       = expression(paste("ERA5 gapfilled (g C ", m^-2, " yr"^-1, ")")),
       color   = "State class",
-      caption = paste(strwrap(
-        "LUT = balanced site-month-hour lookup from NEON.30min.Gapfill.R. Orange quadrants: methods disagree on sign. Bars: 95% simulation CI.",
-        width = 65), collapse = "\n")
+      #caption = paste(strwrap(
+      #  "Balanced = site-month-hour lookup from NEON.30min.Gapfill.R. Orange quadrants: methods disagree on sign. Bars: 95% simulation CI.",
+     #   width = 65), collapse = "\n")
     ) +
     theme_neon(FIG_BASE) +
     theme(
@@ -899,9 +904,9 @@ if (era5_files_present) {
     geom_col(width = 0.7, alpha = 0.9) +
     scale_fill_manual(values = behavior_colors, na.translate = FALSE) +
     labs(
-      title = paste(strwrap("ERA5 vs. LUT Annual Budget Difference", width = 35),
+      title = paste(strwrap("ERA5 vs. Balanced Annual Budget Difference", width = 35),
                     collapse = "\n"),
-      subtitle = "ERA5 minus LUT balanced budget; positive = ERA5 higher",
+      subtitle = "ERA5 minus Balanced budget; positive = ERA5 higher",
       x     = expression(paste(Delta, " Annual budget (g C ", m^-2, " yr"^-1, ")")),
       y     = NULL, fill = "State class"
     ) +
@@ -976,7 +981,7 @@ if (era5_files_present) {
     theme_neon(FIG_BASE_CPLEX) +
     labs(
       x = "Flux magnitude in native units", y = NULL, shape = "Ecosystem type",
-      title = expression(paste("NEON CH"[4], " ERA5-Gapfilled Flux Magnitudes"))
+      #title = expression(paste("NEON CH"[4], " ERA5-Gapfilled Flux Magnitudes"))
     ) +
     guides(color = "none", shape = guide_legend(override.aes = list(size = 3.7, alpha = 1))) +
     theme(
@@ -1045,7 +1050,7 @@ if (era5_files_present) {
     labs(
       x = "State class",
       y = expression(paste("Annual CH"[4], " flux (g C ", m^-2, " ", yr^-1, ")")),
-      title = "A. Annual Flux Magnitude"
+      title = "A. "
     ) +
     guides(fill = guide_legend(nrow = 1, order = 1, override.aes = list(alpha = 1))) +
     theme(
@@ -1114,7 +1119,7 @@ if (era5_files_present) {
     labs(
       x = "Hour of day",
       y = expression(paste("30-min CH"[4], " flux (nmol C ", m^-2, " ", s^-1, ")")),
-      color = "State Class", title = "C. Diel Flux Pattern"
+      color = "State Class", title = "C. "
     ) +
     guides(fill = "none", color = guide_legend(nrow = 1, order = 2, override.aes = list(linewidth = 1.2))) +
     theme(legend.position = "none", plot.title = element_text(face = "bold", size = 12))
@@ -1135,7 +1140,7 @@ if (era5_files_present) {
     theme_neon(FIG_BASE) +
     labs(
       x = "Hour of day", y = "Probability of positive flux",
-      color = "State Class", title = "D. Diel source probability"
+      color = "State Class", title = "D."
     ) +
     guides(fill = "none", color = guide_legend(nrow = 1, order = 2, override.aes = list(linewidth = 1.2))) +
     theme(legend.position = "none", plot.title = element_text(face = "bold", size = 12))
@@ -1147,7 +1152,7 @@ if (era5_files_present) {
     scale_fill_manual(values = behavior_colors, drop = FALSE, na.translate = FALSE) +
     scale_x_continuous(expand = expansion(mult = c(0, 0.16)), breaks = scales::breaks_width(5)) +
     theme_neon(FIG_BASE) +
-    labs(x = "Number of sites", y = NULL, title = "B. Sites per state class") +
+    labs(x = "Number of sites", y = NULL, title = "B. ") +
     guides(fill = "none") +
     theme(plot.title = element_text(face = "bold", size = 12), axis.text.y = element_text(size = 9))
 
@@ -1172,7 +1177,7 @@ if (era5_files_present) {
       theme_neon(FIG_BASE) +
       labs(
         x = "Month", y = "Probability of positive flux",
-        title = "E. Seasonal source probability"
+        title = "E."
       ) +
       guides(
         fill  = "none",
@@ -1210,7 +1215,7 @@ if (era5_files_present) {
     panel_height <- FIG_H_MED
   }
 
-  ggsave("FIGURES/NEON_ERA5_flux_pattern_diel_behavior_panel.png",
+  ggsave("FIGURES/Figure2_NEON_ERA5_flux_pattern_diel_behavior_panel.png",
          plot_era5_flux_pattern_panel,
          width = FIG_W_FULL, height = panel_height, units = "in", dpi = 300)
 
@@ -1218,12 +1223,12 @@ if (era5_files_present) {
   # ERA5 not available — save 3-scale version of flux magnitude figure
   plot_all_site_flux_magnitude <- make_flux_magnitude_plot(
     all_site_flux_magnitude_summary,
-    "Rows: state class. Columns: 30-min standardized, daily lookup-filled, annual scaled. Bars +/- 1 SD."
-  )
-  ggsave("FIGURES/NEON_all_site_category_flux_magnitudes.png",
+    "")
+  ggsave("FIGURES/Figure1_NEON_all_site_category_flux_magnitudes.png",
          duplicate_top_strip_to_bottom(plot_all_site_flux_magnitude),
          width = FIG_W_FULL, height = FIG_H_TALL, units = "in", dpi = 300)
   message("ERA5 output files not found — skipping ERA5 plots. Run NEON.ERA5.HalfHourlyGapfill.R first.")
 }
 
 message("Wrote all NEON CH4 figures to FIGURES/.")
+

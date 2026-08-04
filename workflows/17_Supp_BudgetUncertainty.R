@@ -196,13 +196,13 @@ pA <- ggplot(pA_data,
   geom_hline(yintercept = 0,          color = "grey40",  linetype = "solid",  linewidth = 0.4) +
   geom_line(aes(group = approach), linewidth = 1.0) +
   geom_point(size = 2.5) +
-  annotate("text", x = nlevels(pA_data$label), y = gmb_target + 2,
+  annotate("text", x = nlevels(pA_data$label), y = gmb_target +5,
            label = "GMB reference\n(−35 Tg yr⁻¹)", hjust = 1, size = 3.8, color = "#2166AC") +
   scale_color_manual(values = approach_colors, name = NULL) +
   scale_linetype_manual(values = approach_linetype, name = NULL) +
   scale_shape_manual(values = c(Continuous = 16, Dichotomous = 17, `All-Sink` = 15), name = NULL) +
   labs(
-    title = "A. Mean annual budget under each bias scenario",
+    title = "A. ",
     x     = "Flux magnitude adjustment",
     y     = "Mean annual budget (Tg CH₄ yr⁻¹)"
   ) +
@@ -249,7 +249,7 @@ pB <- ggplot(ts_data, aes(x = Year, y = adj_tg, color = label, linetype = label)
     name = "Adjustment") +
   scale_x_continuous(breaks = seq(2000, 2025, 5)) +
   labs(
-    title = "B. Annual budget time series — Continuous approach",
+    title = "B. ",
     x     = "Year",
     y     = "Annual budget (Tg CH₄ yr⁻¹)"
   ) +
@@ -270,7 +270,7 @@ pC <- ggplot(pC_data,
   scale_fill_manual(values = approach_colors, name = NULL) +
   scale_y_continuous(expand = expansion(mult = c(0.08, 0.08))) +
   labs(
-    title = "C. Change in mean annual budget relative to baseline",
+    title = "C.",
     x     = "Flux magnitude adjustment",
     y     = expression(Delta~"mean annual budget (Tg CH"[4]~"yr"^{-1}*")")
   ) +
@@ -287,7 +287,7 @@ pD <- scenario_summary %>%
   scale_y_continuous(limits = c(0, 105), expand = c(0, 0),
                      labels = function(x) paste0(x, "%")) +
   labs(
-    title = "D. Years with net-positive budget (source)",
+    title = "D. ",
     x     = "Flux magnitude adjustment",
     y     = "% of years with budget > 0"
   ) +
@@ -295,26 +295,7 @@ pD <- scenario_summary %>%
   theme(axis.text.x = element_text(size = 10))
 
 # ── Assemble ──────────────────────────────────────────────────────────────────
-fig_budget <- (pA | pB) / (pC | pD) +
-  plot_annotation(
-    title   = "Sensitivity of ERA5 spatially upscaled CH₄ budget to systematic FG magnitude bias",
-    caption = paste(strwrap(paste(
-      "Multiplicative bias corrections applied uniformly to ERA5 spatially upscaled annual",
-      "CH4 budgets (three approaches: Continuous, Dichotomous, All-Sink).",
-      if (!is.na(obs_bias) && obs_abs > 0.03)
-        sprintf("Dashed red column marks the scenario matching the observed mean FG-EC relative bias (%+.1f%%) from validation sites.",
-                -obs_abs * 100)
-      else "",
-      "A: mean adjusted budget across scenarios with the GMB reference shown for context.",
-      "B: annual time series for the Continuous approach at key scenarios.",
-      "C: absolute change in mean budget relative to the 0% (baseline) scenario.",
-      "D: fraction of years with a net-positive (source) budget."),
-      width = 115), collapse = "\n"),
-    theme = theme(
-      plot.title   = element_text(size = 14, face = "bold"),
-      plot.caption = element_text(size = 10, hjust = 0, color = "grey30")
-    )
-  )
+fig_budget <- (pA | pB) / (pC | pD) 
 
 ggsave(
   file.path(fig_dir, "FigS_Budget_Uncertainty.png"),
