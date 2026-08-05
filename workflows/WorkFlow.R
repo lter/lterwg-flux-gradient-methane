@@ -76,6 +76,7 @@ source(fs::path(DirRepo.ch4, 'workflows/07_NEON_SiteMap.R'))
 # 08 Publication figures from NEON flux products
 message('Step 08: NEON figures...')
 source(fs::path(DirRepo.ch4, 'workflows/08_NEON_Figures.R'))
+# FIGURE 1- 2 and supplemental figures S2.1 and 
 
 # 09 Compare ERA5-gapfilled NEON fluxes with FLUXNET reference rates
 message('Step 09: FLUXNET comparison...')

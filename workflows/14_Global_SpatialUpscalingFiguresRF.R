@@ -568,16 +568,33 @@ if (file.exists(magnitude_fitted_values_file)) {
 
   # Duplicated from 12_SourceProp_MagnitudeModels.R / 12b_Model_FIGURES_RF.R
   # (kept in sync manually, same pattern used between 12/12b/13/14/19).
+  # CCC = r * C_b (accuracy factor); annotated alongside mean bias because r
+  # ignores departures from the 1:1 line.
+  ccc_components <- function(observed, predicted) {
+    ok <- is.finite(observed) & is.finite(predicted)
+    observed <- observed[ok]; predicted <- predicted[ok]
+    mo <- mean(observed); mp <- mean(predicted)
+    vo <- mean((observed - mo)^2); vp <- mean((predicted - mp)^2)
+    cov_op <- mean((observed - mo) * (predicted - mp))
+    r   <- if (vo > 0 && vp > 0) cov_op / sqrt(vo * vp) else NA_real_
+    ccc <- 2 * cov_op / (vo + vp + (mo - mp)^2)
+    list(ccc = ccc, accuracy_cb = if (!is.na(r) && r != 0) ccc / r else NA_real_)
+  }
   make_mag_plot <- function(model_label, panel_tag) {
-    n_obs <- nrow(filter(magnitude_fitted_values, magnitude_model == model_label))
-    magnitude_fitted_values %>%
-      filter(magnitude_model == model_label, !is.na(EcoType)) %>%
+    d   <- filter(magnitude_fitted_values, magnitude_model == model_label, !is.na(EcoType))
+    cc  <- ccc_components(d$monthly_flux_gC_m2_month, d$fitted_flux_gC_m2_month)
+    lab <- sprintf("CCC = %.2f  (C_b = %.2f)\nbias = %+.3f g C m⁻² mo⁻¹",
+                   cc$ccc, cc$accuracy_cb,
+                   mean(d$fitted_flux_gC_m2_month - d$monthly_flux_gC_m2_month, na.rm = TRUE))
+    d %>%
       ggplot(aes(x = monthly_flux_gC_m2_month, y = fitted_flux_gC_m2_month, color = EcoType)) +
-      geom_hline(yintercept = 0, color = "grey70", linewidth = 0.3) +
-      geom_vline(xintercept = 0, color = "grey70", linewidth = 0.3) +
+      geom_hline(yintercept = 0, color = "grey95", linewidth = 0.3) +
+      geom_vline(xintercept = 0, color = "grey95", linewidth = 0.3) +
       geom_abline(slope = 1, intercept = 0, color = "grey35",
                   linetype = "dashed", linewidth = 0.5) +
       geom_point(alpha = 0.5, size = 1.5) +
+      annotate("text", x = -Inf, y = Inf, hjust = -0.08, vjust = 1.25,
+               label = lab, size = 3.0, color = "grey20", lineheight = 0.95) +
       scale_color_manual(values = ecotype_colors) +
       labs(title = paste0(panel_tag),
            x = "Observed (g C m⁻² mo⁻¹)",
@@ -586,8 +603,8 @@ if (file.exists(magnitude_fitted_values_file)) {
       fig_theme
   }
 
-  p2a <- make_mag_plot("Weak-sink",   "A")
-  p2b <- make_mag_plot("Weak-source", "B")
+  p2a <- make_mag_plot("Weak-sink",   "A.")
+  p2b <- make_mag_plot("Weak-source", "B.")
 
   shared_ecotype_legend <- get_legend(
     p2a + theme(legend.position = "top",

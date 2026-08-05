@@ -82,8 +82,8 @@ fig_theme <- theme_bw(base_size = 12) +
     legend.position   = "bottom",
     legend.title      = element_text(size = 11),
     legend.text       = element_text(size = 10),
-    strip.background  = element_rect(fill = "grey92"),
-    strip.text        = element_text(size = 11),
+    strip.background  = element_rect(fill = "black", color = NA),
+    strip.text        = element_text(size = 11, color = "white"),
     axis.title        = element_text(size = 11),
     axis.text         = element_text(size = 10)
   )
@@ -169,8 +169,8 @@ make_mag_plot <- function(model_label, panel_tag) {
   magnitude_fitted_values %>%
     filter(magnitude_model == model_label, !is.na(EcoType)) %>%
     ggplot(aes(x = monthly_flux_gC_m2_month, y = fitted_flux_gC_m2_month, color = EcoType)) +
-    geom_hline(yintercept = 0, color = "grey70", linewidth = 0.3) +
-    geom_vline(xintercept = 0, color = "grey70", linewidth = 0.3) +
+    geom_hline(yintercept = 0, color = "grey95", linewidth = 0.3) +
+    geom_vline(xintercept = 0, color = "grey95", linewidth = 0.3) +
     geom_abline(slope = 1, intercept = 0, color = "grey35",
                 linetype = "dashed", linewidth = 0.5) +
     geom_point(alpha = 0.5, size = 1.5) +

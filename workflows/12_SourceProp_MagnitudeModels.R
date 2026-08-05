@@ -102,9 +102,13 @@ dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(figure_dir, showWarnings = FALSE, recursive = TRUE)
 
 era5_30min_file    <- file.path(localdir.ch4, "OUTPUT/NEON_ERA5_gapfilled_30min.csv.gz")
-site_behavior_file <- file.path(localdir.ch4, "OUTPUT/30min_site_behavior.csv")
+# Static site attributes (SITE_ID, EcoType, MAP, MAT) used to build the upland
+# training set. Sourced from 05_NEON_FluxAnalysis.R's actively-regenerated
+# summary rather than the orphaned OUTPUT/30min_site_behavior.csv (no active
+# script writes that file). Only EcoType/MAP/MAT are used downstream.
+site_attributes_file <- file.path(localdir.ch4, "OUTPUT/NEON_scale_annual_budget_summary.csv")
 
-required_files <- c(era5_30min_file, site_behavior_file)
+required_files <- c(era5_30min_file, site_attributes_file)
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) > 0) stop("Missing: ", paste(missing_files, collapse = ", "))
 
@@ -230,19 +234,46 @@ oob_predict_rf_magnitude <- function(fit) {
   if (identical(fit$state, "Weak-sink")) -mag else mag
 }
 
+# Lin's concordance correlation coefficient (CCC) and its precision/accuracy
+# decomposition. CCC = r * C_b, where r is Pearson correlation (precision) and
+# C_b <= 1 is the bias-correction / accuracy factor that penalises any departure
+# of the best-fit line from the 1:1 line. slope_pred_obs is the slope of
+# predicted ~ observed; a value < 1 flags compression of predictions toward the
+# mean (regression to the mean), which r alone cannot detect.
+ccc_components <- function(observed, predicted) {
+  ok <- is.finite(observed) & is.finite(predicted)
+  observed <- observed[ok]; predicted <- predicted[ok]
+  mo <- mean(observed); mp <- mean(predicted)
+  vo <- mean((observed - mo)^2); vp <- mean((predicted - mp)^2)
+  cov_op <- mean((observed - mo) * (predicted - mp))
+  r   <- if (vo > 0 && vp > 0) cov_op / sqrt(vo * vp) else NA_real_
+  ccc <- 2 * cov_op / (vo + vp + (mo - mp)^2)
+  list(
+    ccc            = ccc,
+    accuracy_cb    = if (!is.na(r) && r != 0) ccc / r else NA_real_,
+    slope_pred_obs = if (vo > 0) cov_op / vo else NA_real_
+  )
+}
+
 summarise_magnitude_fit <- function(training_data, fit) {
-  fitted <- oob_predict_rf_magnitude(fit)
+  fitted   <- oob_predict_rf_magnitude(fit)
+  observed <- training_data$monthly_flux_gC_m2_month
+  cc       <- ccc_components(observed, fitted)
   tibble(
     magnitude_model               = fit$state,
     engine                        = fit$engine,
     evaluation_basis               = "OOB (row-level held-out)",
     n_observations                = nrow(training_data),
-    mean_observed_flux            = mean(training_data$monthly_flux_gC_m2_month, na.rm = TRUE),
+    mean_observed_flux            = mean(observed, na.rm = TRUE),
     mean_fitted_flux              = mean(fitted, na.rm = TRUE),
-    rmse_gC_m2_month              = sqrt(mean((training_data$monthly_flux_gC_m2_month - fitted)^2, na.rm = TRUE)),
-    mae_gC_m2_month               = mean(abs(training_data$monthly_flux_gC_m2_month - fitted), na.rm = TRUE),
+    rmse_gC_m2_month              = sqrt(mean((observed - fitted)^2, na.rm = TRUE)),
+    mae_gC_m2_month               = mean(abs(observed - fitted), na.rm = TRUE),
+    bias_gC_m2_month              = mean(fitted - observed, na.rm = TRUE),
     correlation_observed_fitted   = suppressWarnings(
-      cor(training_data$monthly_flux_gC_m2_month, fitted, use = "complete.obs"))
+      cor(observed, fitted, use = "complete.obs")),
+    ccc_observed_fitted           = cc$ccc,
+    ccc_accuracy_cb               = cc$accuracy_cb,
+    slope_fitted_obs              = cc$slope_pred_obs
   )
 }
 
@@ -273,12 +304,12 @@ classification_skill <- function(prob, observed, threshold, model_label, eval_ba
 
 # ── Load and prepare training data ────────────────────────────────────────────
 
-site_behavior <- read.csv(site_behavior_file) %>%
+site_attributes <- read.csv(site_attributes_file) %>%
   mutate(SITE_ID = as.character(SITE_ID))
 
-upland_sites <- site_behavior %>%
+upland_sites <- site_attributes %>%
   filter(!is.na(EcoType),
-    !str_detect(EcoType, regex("wetland|inundat|flood|marsh|swamp|bog|fen|lake|rice",
+    !str_detect(EcoType, regex("wetland|inundat|flood|marsh|swamp|bog|fen|lake|rice|crop|agri",
                                ignore_case = TRUE))) %>%
   distinct(SITE_ID, EcoType, MAP, MAT)
 
@@ -688,7 +719,9 @@ capture.output({
 
 fig_theme <- theme_bw(base_size = 12) +
   theme(panel.grid.minor = element_blank(), plot.title = element_text(face = "bold"),
-        legend.position = "bottom", strip.background = element_rect(fill = "grey92"),
+        legend.position = "bottom",
+        strip.background = element_rect(fill = "black", color = NA),
+        strip.text = element_text(color = "white"),
         axis.title = element_text(size = 11), axis.text = element_text(size = 10))
 
 ecotype_colors <- c(Forest = "#1B7837", Grassland = "#D9B86C",
@@ -716,7 +749,12 @@ ggsave(file.path(figure_dir, "Fig3_classification_skill.png"),
   p3, width = 7, height = 4.5, units = "in", dpi = 300, bg = "white")
 
 # Fig 5: Magnitude model — observed vs fitted (OOB)
+# Panels annotated with CCC (agreement) and mean bias rather than r alone,
+# since r ignores departures from the 1:1 line (see magnitude_model_skill.csv).
 make_mag_plot <- function(model_label, tag) {
+  sk  <- magnitude_model_skill %>% filter(magnitude_model == model_label)
+  lab <- sprintf("CCC = %.2f  (C_b = %.2f)\nbias = %+.3f g C m⁻² mo⁻¹",
+                 sk$ccc_observed_fitted[1], sk$ccc_accuracy_cb[1], sk$bias_gC_m2_month[1])
   magnitude_fitted_values %>%
     filter(magnitude_model == model_label, !is.na(EcoType)) %>%
     ggplot(aes(x = monthly_flux_gC_m2_month, y = fitted_flux_gC_m2_month, color = EcoType)) +
@@ -724,6 +762,8 @@ make_mag_plot <- function(model_label, tag) {
     geom_vline(xintercept = 0, color = "grey70", linewidth = 0.3) +
     geom_abline(slope = 1, intercept = 0, color = "grey35", linetype = "dashed", linewidth = 0.5) +
     geom_point(alpha = 0.5, size = 1.5) +
+    annotate("text", x = -Inf, y = Inf, hjust = -0.08, vjust = 1.25,
+             label = lab, size = 3.2, color = "grey20", lineheight = 0.95) +
     scale_color_manual(values = ecotype_colors) +
     labs(title = paste0(tag, ". ", model_label), color = NULL,
          x = "Observed (g C m⁻² mo⁻¹)", y = "Fitted (g C m⁻² mo⁻¹, OOB)") +

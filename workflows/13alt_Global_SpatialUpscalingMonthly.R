@@ -40,7 +40,9 @@ dir.create(figure_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(data_dir, showWarnings = FALSE, recursive = TRUE)
 
 era5_30min_file <- file.path(localdir.ch4, "OUTPUT/NEON_ERA5_gapfilled_30min.csv.gz")
-site_behavior_file <- file.path(localdir.ch4, "OUTPUT/30min_site_behavior.csv")
+# Static site attributes (SITE_ID, EcoType, MAP, MAT) from 05_NEON_FluxAnalysis.R's
+# actively-regenerated summary, not the orphaned OUTPUT/30min_site_behavior.csv.
+site_attributes_file <- file.path(localdir.ch4, "OUTPUT/NEON_scale_annual_budget_summary.csv")
 
 worldclim_tavg_zip <- file.path(spatial_dir, "wc2.1_10m_tavg.zip")
 worldclim_prec_zip <- file.path(spatial_dir, "wc2.1_10m_prec.zip")
@@ -49,7 +51,7 @@ era5_land_dir <- file.path(data_dir, "era5_land_monthly")
 modis_ecotype_dir <- file.path(data_dir, "modis_mcd12c1_processed")
 wad2m_dir <- file.path(data_dir, "wad2m")
 
-required_files <- c(era5_30min_file, site_behavior_file, ecoregions_zip)
+required_files <- c(era5_30min_file, site_attributes_file, ecoregions_zip)
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) > 0) {
   stop("Missing required files: ", paste(missing_files, collapse = ", "))
@@ -422,13 +424,13 @@ get_inundation_fraction <- function(year, month) {
   r
 }
 
-site_behavior <- read.csv(site_behavior_file) %>%
+site_attributes <- read.csv(site_attributes_file) %>%
   mutate(SITE_ID = as.character(SITE_ID))
 
-upland_sites <- site_behavior %>%
+upland_sites <- site_attributes %>%
   filter(
     !is.na(EcoType),
-    !str_detect(EcoType, regex("wetland|inundat|flood|marsh|swamp|bog|fen|lake|rice", ignore_case = TRUE))
+    !str_detect(EcoType, regex("wetland|inundat|flood|marsh|swamp|bog|fen|lake|rice|crop|agri", ignore_case = TRUE))
   ) %>%
   distinct(SITE_ID, EcoType, MAP, MAT)
 

@@ -86,8 +86,12 @@ theme_neon <- function(base_size = FIG_BASE) {
       plot.subtitle = element_text(size = pmax(6.5, base_size - 2),
                                    lineheight = 1.15,
                                    margin = margin(b = 3, unit = "pt")),
+      # Facet strips: black background, white lettering (project-wide default).
+      # Per-plot theme() overrides that set only size/face inherit this colour,
+      # so faceted figures stay black-on-white unless a plot explicitly resets it.
+      strip.background = element_rect(fill = "black", color = NA),
       strip.text    = element_text(size = pmax(6.5, base_size - 1.5),
-                                   lineheight = 0.95)
+                                   lineheight = 0.95, color = "white")
     )
 }
 
@@ -147,8 +151,12 @@ superscript_units <- function(x) {
 # ── ERA5 behavior lookup (loaded first; used to reclassify all figures) ────────
 # Authoritative ERA5 annual budget classification (sink/source/fluctuating).
 # Every figure reclassifies sites through this lookup so all labels are ERA5-based.
-# Falls back to lookup-fill behavior if the ERA5 budget script has not been run.
-era5_behavior_file <- "OUTPUT/NEON_scale_ERA5_annual_budget_summary.csv"
+# Source is 06_NEON_ERA5Gapfill.R's direct output (NEON_ERA5_gapfilled_mean_annual_budget.csv),
+# NOT the 05_NEON_FluxAnalysis.R summary derivative, which can lag a newer ERA5
+# gapfill run and disagree with the other ERA5 products (this caused an earlier
+# mismatch in the Fluctuating site between figures). Falls back to lookup-fill
+# behavior if the ERA5 budget script has not been run.
+era5_behavior_file <- "OUTPUT/NEON_ERA5_gapfilled_mean_annual_budget.csv"
 if (file.exists(era5_behavior_file)) {
   era5_behavior_lookup <- read.csv(era5_behavior_file) %>%
     transmute(
@@ -312,7 +320,11 @@ if (era5_files_present) {
       reference_annual_behavior = factor(reference_annual_behavior, levels = behavior_levels),
       sign_agree = sign(mean_era5_gapfilled_annual_budget_gC_m2_yr) ==
                    sign(model_standardized_annual_budget_gC_m2_yr)
-    )
+    ) %>%
+    # Route the ERA5 class through the shared lookup so the budget-comparison
+    # scatter colours (and anything derived from budget_comparison) use the same
+    # ERA5 classification as every other figure.
+    apply_era5_behavior(drop_cols = "era5_annual_behavior", new_col = "era5_annual_behavior")
 
   era5_annual_class_change_summary <- read.csv("OUTPUT/NEON_ERA5_reference_annual_class_changes.csv") %>%
     mutate(
@@ -335,7 +347,6 @@ if (era5_files_present) {
   era5_mag_raw <- read.csv("OUTPUT/NEON_ERA5_all_site_flux_magnitude_summary.csv") %>%
     mutate(
       scale = recode(as.character(scale), "Annual scaled" = "Annual"),
-      annual_behavior = factor(annual_behavior, levels = behavior_levels),
       scale = factor(scale, levels = c("30 min", "Daily", "Annual", "Annual ERA5")),
       scale_label = factor(
         paste0(scale, "\n", flux_unit),
@@ -345,7 +356,8 @@ if (era5_files_present) {
           c("umol C m-2 s-1", "mg C m-2 d-1", "g C m-2 yr-1", "g C m-2 yr-1")
         )
       )
-    )
+    ) %>%
+    apply_era5_behavior(drop_cols = "annual_behavior")
 
   era5_site_order <- era5_mag_raw %>%
     filter(scale == "Annual ERA5") %>%
@@ -356,14 +368,21 @@ if (era5_files_present) {
     mutate(SITE_ID_plot = factor(SITE_ID, levels = rev(era5_site_order)))
 
   era5_annual_site_map_data <- read.csv("OUTPUT/NEON_ERA5_annual_site_map_data.csv") %>%
-    mutate(annual_behavior = factor(annual_behavior, levels = behavior_levels))
+    apply_era5_behavior(drop_cols = "annual_behavior")
 
   era5_annual_method_flux_summary <- read.csv("OUTPUT/NEON_ERA5_scaled_vs_era5_annual_flux_by_site.csv") %>%
+    apply_era5_behavior(drop_cols = "annual_behavior") %>%
     mutate(
-      annual_behavior = factor(annual_behavior, levels = behavior_levels),
       annual_method   = factor(annual_method, levels = c("Scaled annual", "ERA5 annual"))
     )
 
+  # NOTE: the seasonal and diel summaries below are pre-aggregated BY behavior
+  # class in 06_NEON_ERA5Gapfill.R and carry no SITE_ID, so they cannot be
+  # re-labelled through era5_behavior_lookup here. They inherit the ERA5
+  # classification from the same 06_NEON_ERA5Gapfill.R run that era5_behavior_lookup
+  # reads (NEON_ERA5_gapfilled_mean_annual_budget.csv), so they stay consistent as
+  # long as script 06 is re-run before this script. To make them lookup-driven
+  # they would need to be re-aggregated from per-site ERA5 diel/seasonal data.
   seasonal_file <- "OUTPUT/NEON_ERA5_seasonal_behavior_summary.csv"
   if (file.exists(seasonal_file)) {
     era5_seasonal_behavior_summary <- read.csv(seasonal_file) %>%
@@ -376,11 +395,26 @@ if (era5_files_present) {
   era5_diel_behavior_summary <- read.csv("OUTPUT/NEON_ERA5_diel_behavior_summary.csv") %>%
     mutate(annual_behavior = factor(annual_behavior, levels = behavior_levels))
 
-  era5_annual_behavior_counts <- read.csv("OUTPUT/NEON_ERA5_annual_behavior_site_counts.csv") %>%
-    mutate(annual_behavior = factor(annual_behavior, levels = behavior_levels))
+  # Site counts recomputed from the shared lookup (not the stale CSV) so the
+  # ERA5 behavior tallies match every other figure.
+  if (!is.null(era5_behavior_lookup)) {
+    era5_annual_behavior_counts <- era5_behavior_lookup %>%
+      count(annual_behavior, name = "n_sites") %>%
+      complete(annual_behavior = factor(behavior_levels, levels = behavior_levels),
+               fill = list(n_sites = 0L))
 
-  era5_annual_behavior_ecotype_counts <- read.csv("OUTPUT/NEON_ERA5_annual_behavior_ecotype_counts.csv") %>%
-    mutate(annual_behavior = factor(annual_behavior, levels = behavior_levels))
+    era5_annual_behavior_ecotype_counts <- era5_behavior_lookup %>%
+      left_join(annual_budget_summary %>% transmute(SITE_ID, EcoType), by = "SITE_ID") %>%
+      filter(!is.na(EcoType)) %>%
+      count(annual_behavior, EcoType, name = "n_sites") %>%
+      complete(annual_behavior = factor(behavior_levels, levels = behavior_levels),
+               EcoType, fill = list(n_sites = 0L))
+  } else {
+    era5_annual_behavior_counts <- read.csv("OUTPUT/NEON_ERA5_annual_behavior_site_counts.csv") %>%
+      mutate(annual_behavior = factor(annual_behavior, levels = behavior_levels))
+    era5_annual_behavior_ecotype_counts <- read.csv("OUTPUT/NEON_ERA5_annual_behavior_ecotype_counts.csv") %>%
+      mutate(annual_behavior = factor(annual_behavior, levels = behavior_levels))
+  }
 } else {
   message("ERA5 output files not found — skipping ERA5 plots. Run NEON.ERA5.HalfHourlyGapfill.R first.")
 }
@@ -690,23 +724,26 @@ ggsave("FIGURES/NEON_daily_flux_by_site.png", plot_daily_distribution, width = F
 if (era5_files_present) {
 
   # ── Augment all_site_flux_magnitude_summary with ERA5 annual column ──────────
-  # era5_behavior_lookup already loaded at top of script; annual_behavior in
-  # all_site_flux_magnitude_summary is already ERA5-based.
+  # Behavior facets and site order are driven through era5_behavior_lookup (the
+  # authoritative ERA5 annual budget classification) rather than
+  # budget_comparison's own era5_annual_behavior column, so every scale/row in
+  # this figure — and every other figure — uses the same ERA5 classification.
   scale_levels_4 <- c("30 min", "Daily", "Annual", "Annual ERA5")
   flux_units_4   <- superscript_units(c("nmol C m-2 s-1", "mg C m-2 d-1", "g C m-2 yr-1", "g C m-2 yr-1"))
 
   # Site order: ERA5 behavior → ERA5 annual flux magnitude
   era5_site_order_4 <- budget_comparison %>%
-    mutate(annual_behavior = factor(era5_annual_behavior, levels = behavior_levels)) %>%
+    apply_era5_behavior(drop_cols = "era5_annual_behavior", new_col = "annual_behavior") %>%
     arrange(annual_behavior, mean_era5_gapfilled_annual_budget_gC_m2_yr, SITE_ID) %>%
     pull(SITE_ID)
 
   era5_flux_rows <- budget_comparison %>%
+    apply_era5_behavior(drop_cols = "era5_annual_behavior", new_col = "annual_behavior") %>%
     left_join(annual_budget_summary %>% transmute(SITE_ID, EcoType), by = "SITE_ID") %>%
     transmute(
       SITE_ID,
       EcoType,
-      annual_behavior   = factor(era5_annual_behavior, levels = behavior_levels),
+      annual_behavior   = factor(annual_behavior, levels = behavior_levels),
       scale             = "Annual ERA5",
       flux_unit         = superscript_units("g C m-2 yr-1"),
       flux_native       = mean_era5_gapfilled_annual_budget_gC_m2_yr,
@@ -794,8 +831,8 @@ if (era5_files_present) {
     theme(
       plot.title    = element_text(face = "bold"),
       plot.subtitle = element_text(size = 9, color = "grey35"),
-      strip.background = element_rect(fill = "grey94", color = "grey40"),
-      strip.text    = element_text(face = "bold", size = 9),
+      strip.background = element_rect(fill = "black", color = NA),
+      strip.text    = element_text(face = "bold", size = 9, color = "white"),
       panel.grid.minor = element_blank()
     )
 
@@ -989,8 +1026,8 @@ if (era5_files_present) {
       legend.position = "bottom",
       axis.text.y   = element_text(size = 7),
       axis.text.x   = element_text(size = 7),
-      strip.text.x  = element_text(face = "bold", size = 7, lineheight = 0.95),
-      strip.text.y  = element_text(face = "bold", size = 7),
+      strip.text.x  = element_text(face = "bold", size = 7, lineheight = 0.95, color = "white"),
+      strip.text.y  = element_text(face = "bold", size = 7, color = "white"),
       panel.spacing.x = unit(0.45, "lines"),
       panel.spacing.y = unit(0.30, "lines")
     )

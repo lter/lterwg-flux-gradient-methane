@@ -94,9 +94,11 @@ dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(figure_dir, showWarnings = FALSE, recursive = TRUE)
 
 era5_30min_file    <- file.path(localdir.ch4, "OUTPUT/NEON_ERA5_gapfilled_30min.csv.gz")
-site_behavior_file <- file.path(localdir.ch4, "OUTPUT/30min_site_behavior.csv")
+# Static site attributes (SITE_ID, EcoType, MAP, MAT) from 05_NEON_FluxAnalysis.R's
+# actively-regenerated summary, not the orphaned OUTPUT/30min_site_behavior.csv.
+site_attributes_file <- file.path(localdir.ch4, "OUTPUT/NEON_scale_annual_budget_summary.csv")
 
-required_files <- c(era5_30min_file, site_behavior_file)
+required_files <- c(era5_30min_file, site_attributes_file)
 missing_files <- required_files[!file.exists(required_files)]
 if (length(missing_files) > 0) stop("Missing: ", paste(missing_files, collapse = ", "))
 
@@ -201,12 +203,12 @@ predict_rf_magnitude <- function(fit, newdata) {
 # ── Load and prepare training data ────────────────────────────────────────────
 # Identical construction to 12_SourceProp_MagnitudeModels.R.
 
-site_behavior <- read.csv(site_behavior_file) %>%
+site_attributes <- read.csv(site_attributes_file) %>%
   mutate(SITE_ID = as.character(SITE_ID))
 
-upland_sites <- site_behavior %>%
+upland_sites <- site_attributes %>%
   filter(!is.na(EcoType),
-    !str_detect(EcoType, regex("wetland|inundat|flood|marsh|swamp|bog|fen|lake|rice",
+    !str_detect(EcoType, regex("wetland|inundat|flood|marsh|swamp|bog|fen|lake|rice|crop|agri",
                                ignore_case = TRUE))) %>%
   distinct(SITE_ID, EcoType, MAP, MAT)
 
@@ -382,6 +384,24 @@ message(sprintf("LOSO complete: %d held-out site-months scored across %d sites."
 
 # ── Skill summaries ───────────────────────────────────────────────────────────
 
+# Lin's concordance correlation coefficient (CCC) and its precision/accuracy
+# decomposition. CCC = r * C_b (accuracy factor <= 1); slope_pred_obs < 1 flags
+# compression of predictions toward the mean, which r alone cannot detect.
+ccc_components <- function(observed, predicted) {
+  ok <- is.finite(observed) & is.finite(predicted)
+  observed <- observed[ok]; predicted <- predicted[ok]
+  mo <- mean(observed); mp <- mean(predicted)
+  vo <- mean((observed - mo)^2); vp <- mean((predicted - mp)^2)
+  cov_op <- mean((observed - mo) * (predicted - mp))
+  r   <- if (vo > 0 && vp > 0) cov_op / sqrt(vo * vp) else NA_real_
+  ccc <- 2 * cov_op / (vo + vp + (mo - mp)^2)
+  list(
+    ccc            = ccc,
+    accuracy_cb    = if (!is.na(r) && r != 0) ccc / r else NA_real_,
+    slope_pred_obs = if (vo > 0) cov_op / vo else NA_real_
+  )
+}
+
 summarise_loso <- function(df, ...) {
   df %>%
     group_by(...) %>%
@@ -393,6 +413,9 @@ summarise_loso <- function(df, ...) {
       bias_gC_m2_month                = mean(predicted_flux_gC_m2_month - monthly_flux_gC_m2_month, na.rm = TRUE),
       correlation_observed_predicted  = suppressWarnings(
         cor(monthly_flux_gC_m2_month, predicted_flux_gC_m2_month, use = "complete.obs")),
+      ccc_observed_predicted          = ccc_components(monthly_flux_gC_m2_month, predicted_flux_gC_m2_month)$ccc,
+      ccc_accuracy_cb                 = ccc_components(monthly_flux_gC_m2_month, predicted_flux_gC_m2_month)$accuracy_cb,
+      slope_predicted_obs             = ccc_components(monthly_flux_gC_m2_month, predicted_flux_gC_m2_month)$slope_pred_obs,
       .groups = "drop"
     ) %>%
     mutate(evaluation_basis = "Leave-one-site-out (unseen site)", .after = 1)

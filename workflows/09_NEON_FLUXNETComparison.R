@@ -1370,12 +1370,12 @@ message("Wrote FIGURES/NEON_FLUXNET_CH4_flux_density.png")
 
 combined_figure <- (
   comparison_figure +
-    labs(tag = "A") +
+    labs(tag = "A.") +
     theme(plot.tag = element_text(size = 14, face = "bold"))
 ) /
   (
     flux_density_figure +
-      labs(tag = "B") +
+      labs(tag = "B.") +
       theme(plot.tag = element_text(size = 14, face = "bold"))
   ) +
   plot_layout(heights = c(2, 1)) &
