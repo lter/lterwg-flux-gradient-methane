@@ -456,7 +456,8 @@ gapfill_data <- era5_halfhour %>%
     # 7-day rolling mean air temperature (336 half-hour steps = 7 × 48)
     tair_roll7   = slider::slide_dbl(ERA5_Tair_C,    mean, .before = 335L, .complete = FALSE, na_rm = TRUE),
     # 7-day rolling sum precipitation (mm accumulated over previous 7 days)
-    precip_roll7 = slider::slide_dbl(ERA5_precip_mm, sum,  .before = 335L, .complete = FALSE, na_rm = TRUE)
+    # Hourly-rate values occur every half-hour: integrate with a 0.5 h weight.
+    precip_roll7 = slider::slide_dbl(ERA5_precip_mm * 0.5, sum,  .before = 335L, .complete = FALSE, na.rm = TRUE)
   ) %>%
   ungroup() %>%
   # ── Climatological lookup joins (cascade: finest available resolution) ────────
