@@ -1,0 +1,15 @@
+source("functions/ch4.units.R")
+eq <- function(x,y) stopifnot(isTRUE(all.equal(x,y,tolerance=1e-12)))
+eq(ch4_rate_to_mgC(c(-1,0,1,NA_real_), "umol"), c(-21.6198,0,21.6198,NA_real_))
+eq(ch4_rate_to_mgC(1000, "nmol"), ch4_rate_to_mgC(1, "umol"))
+eq(ch4_rate_to_mgC(1, "umol", seconds=3600), 43.2396)
+eq(sum(rep(ch4_rate_to_mgC(1,"umol"),48)), 1037.7504)
+eq(sum(rep(ch4_rate_to_mgC(1,"nmol"),48*365))/1000, 0.378778896)
+eq(ch4_rate_to_mgC(-2,"umol")*1000/12.011/1800, -2)
+stopifnot(inherits(try(ch4_rate_to_mgC(1,"ppm"),silent=TRUE),"try-error"))
+# Check the workflow calls this conversion with the NEON prefix and duration.
+a <- parse("workflows/05_NEON_FluxAnalysis.R")
+assignment <- Filter(function(x) is.call(x) && identical(x[[1]],as.name("<-")) &&
+  identical(x[[2]],as.name("flux_to_mgC_30min")), as.list(a))
+env <- new.env(); eval(assignment[[1]],env); eq(env$flux_to_mgC_30min,21.6198)
+message("CH4 mass conversion checks passed.")
