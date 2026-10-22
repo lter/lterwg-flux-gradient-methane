@@ -322,14 +322,14 @@ for( site in site.list){
     full_join( MBR_9min_FILTER , by = c('dLevelsAminusB', 'Site', 'Canopy_L1'), relationship = "many-to-many")  %>% 
     select( timeEndA.local,FG_mean , Approach, Canopy_L1, gas, 
             TowerPosition_A, TowerPosition_B,  EC_mean, cross_grad_flag, dLevelsAminusB,
-            RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15) %>% filter(Canopy_L1 != "WW")
+            RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15) %>% filter(Canopy_L1 != "WW", gas == "CH4")
 
   
   WP_9min_FILTER_canopy <- canopy.sub %>% filter( Approach == "WP") %>% 
     full_join( WP_9min_FILTER , by = c('dLevelsAminusB', 'Site', 'Canopy_L1'), relationship = "many-to-many" )  %>% 
     select( timeEndA.local,FG_mean ,Approach, Canopy_L1, gas, 
             TowerPosition_A, TowerPosition_B,  EC_mean, cross_grad_flag, dLevelsAminusB,
-            RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15) %>% filter(Canopy_L1 != "WW")
+            RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15) %>% filter(Canopy_L1 != "WW", gas == "CH4")
   
   AE_9min_FILTER_canopy <- canopy.sub %>% 
     filter( Approach == "AE") %>% 
@@ -337,7 +337,7 @@ for( site in site.list){
                relationship = "many-to-many")  %>% 
     select( timeEndA.local,FG_mean, Approach, Canopy_L1, gas, 
             TowerPosition_A, TowerPosition_B,  EC_mean, cross_grad_flag, dLevelsAminusB,
-            RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15) %>% filter(Canopy_L1 != "WW")
+            RH, PAR, Tair_K) %>% mutate( Tair_C = Tair_K -273.15) %>% filter(Canopy_L1 != "WW", gas == "CH4")
   
   Data <- rbind( MBR_9min_FILTER_canopy,  AE_9min_FILTER_canopy, WP_9min_FILTER_canopy) %>% as.data.frame() 
   
