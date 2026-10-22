@@ -17,7 +17,15 @@ for( site in site.list){
   VAL_RSHP_sum_site <- NEON_RSHP_EVAL %>% filter( Site == site)
 
   
-  SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE[[site]] <- SITE_DATA_FILTERED[[site]] %>% 
+  site_flux <- SITE_DATA_FILTERED[[site]]
+  if (!"gas" %in% names(site_flux) || anyNA(site_flux$gas)) {
+    stop("Missing gas labels for ", site, "; regenerate the filtered inputs.")
+  }
+  # Existing saved files can contain CO2/H2O as well as CH4.
+  site_flux <- site_flux %>% filter(gas == "CH4")
+  if (nrow(site_flux) == 0L) stop("No CH4 observations for ", site)
+
+  SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE[[site]] <- site_flux %>%
     full_join(VAL_RSHP_sum_site, by=c('Approach', 'dLevelsAminusB' )) %>% 
     mutate(month = format(timeEndA.local,'%m') %>% as.numeric,
            season = case_when(
