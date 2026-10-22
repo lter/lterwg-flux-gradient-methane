@@ -1,7 +1,7 @@
 # VAL_Justification_Supplement.R
 # Generates publication figures for the FG validation supplement.
 # FG figures use FG_total (gradient + storage flux, from 02b_VAL_TotalFlux.R)
-# rather than FG_mean alone, since EC_mean inherently includes storage.
+# rather than FG_mean alone. The EC storage basis requires separate confirmation.
 #
 # Requires (in localdir.ch4):
 #   SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata
@@ -14,6 +14,11 @@
 #   ValSupp_Fig3_FGvsEC.png          — 30-min FG vs EC scatter
 #   ValSupp_Fig4_Annual.png          — annual/seasonal performance summary
 
+# The master workflow sets DirRepo.ch4; standalone runs may set DIRREPO_CH4.
+if (!exists("DirRepo.ch4")) DirRepo.ch4 <- Sys.getenv("DIRREPO_CH4", unset = getwd())
+source(file.path(DirRepo.ch4, "functions/validation.units.R"))
+source(file.path(DirRepo.ch4, "functions/ch4.units.R"))
+
 library(tidyverse)
 library(ggplot2)
 library(ggpubr)
@@ -25,7 +30,7 @@ figure_dir <- "/Volumes/MaloneLab/Research/FluxGradient/Validation_Sites/FIGURES
 dir.create(figure_dir, showWarnings = FALSE, recursive = TRUE)
 
 # ── Unit conversion ────────────────────────────────────────────────────────────
-unit <- 2 * 0.0000288872 * 1000   # µmol CH4 m-2 s-1 → mgC m-2 per 30 min
+unit <- ch4_rate_to_mgC(1, input_unit = "umol", seconds = 1800)
 
 # ── Site metadata (from attr files and Val_canopy.csv) ─────────────────────────
 site_meta <- list(
@@ -64,6 +69,8 @@ rshp_selected <- list(
 
 # ── Load data ──────────────────────────────────────────────────────────────────
 load(fs::path(localdir.ch4, "SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata"))
+SITEval_DATA_FILTERED_RSHPc_H_total <- purrr::imap(
+  SITEval_DATA_FILTERED_RSHPc_H_total, validation_flux_to_umol)
 load(fs::path(localdir.ch4, "CCC_CH4.Rdata"))
 load(fs::path(localdir.ch4, "VAL_RSHP_pairs.Rdata"))
 
