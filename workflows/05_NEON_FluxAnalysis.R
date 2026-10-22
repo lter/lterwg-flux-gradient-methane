@@ -8,6 +8,10 @@
 # Source/sink classification, source-probability models, magnitude models, and
 # driver analyses are handled in NEON.DriverScale.Analysis.R.
 
+# The master workflow sets DirRepo.ch4; standalone runs may set DIRREPO_CH4.
+if (!exists("DirRepo.ch4")) DirRepo.ch4 <- Sys.getenv("DIRREPO_CH4", unset = getwd())
+source(file.path(DirRepo.ch4, "functions/ch4.units.R"))
+
 library(tidyverse)
 library(ggplot2)
 library(patchwork)
@@ -49,7 +53,8 @@ load(soil_input_file)
 ch4_option <- "flux_total"
 gradient_option <- "FG_ENSEMBLE_RSHP"
 storage_option <- "storage_flux_filled"
-flux_to_mgC_30min <- 2 * 0.0000288872 * 1000
+# NEON gradient and storage fluxes are umol CH4 m-2 s-1.
+flux_to_mgC_30min <- ch4_rate_to_mgC(1, input_unit = "umol", seconds = 1800)
 seconds_per_30min <- 30 * 60
 ug_c_per_umol_c <- 12.011
 scale_levels <- c("30 min", "Daily", "Annual scaled")

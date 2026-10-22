@@ -58,7 +58,6 @@ era5_hourly_file <- "OUTPUT/NEON_ERA5_hourly_site_covariates.csv.gz"
 era5_halfhour_file <- "OUTPUT/NEON_ERA5_30min_site_covariates.csv.gz"
 era5_fetch_log_file <- "OUTPUT/NEON_ERA5_fetch_log.csv"
 
-flux_to_mgC_30min <- 2 * 0.0000288872 * 1000
 seconds_per_30min <- 30 * 60
 ug_c_per_umol_c <- 12.011
 min_training_obs_per_site <- 50
