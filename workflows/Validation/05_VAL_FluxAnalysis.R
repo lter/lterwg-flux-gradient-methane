@@ -4,8 +4,8 @@
 # Processes BOTH total flux-gradient (FG_total = FG_mean + storage flux, from
 # 02b_VAL_TotalFlux.R) and co-located eddy-covariance (EC_mean) fluxes through
 # the same pipeline so their 30-min, daily, and annual estimates can be
-# directly compared -- EC_mean inherently includes storage, so FG needs it
-# added too for a fair comparison. Falls back to FG_mean (no storage term)
+# compared. The EC storage basis requires separate confirmation.
+# Falls back to FG_mean (no storage term)
 # if SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata isn't available.
 #
 # Pipeline:
@@ -27,6 +27,11 @@
 #   VAL_FG_vs_EC_daily.csv                   — daily paired FG vs EC
 #   VAL_FG_vs_EC_annual.csv                  — annual paired FG vs EC budget comparison
 #   VAL_site_behavior.csv                    — source/sink classification (FG and EC)
+
+# The master workflow sets DirRepo.ch4; standalone runs may set DIRREPO_CH4.
+if (!exists("DirRepo.ch4")) DirRepo.ch4 <- Sys.getenv("DIRREPO_CH4", unset = getwd())
+source(file.path(DirRepo.ch4, "functions/validation.units.R"))
+source(file.path(DirRepo.ch4, "functions/ch4.units.R"))
 
 library(tidyverse)
 library(lubridate)
@@ -61,6 +66,8 @@ ensemble_file    <- file.path(localdir.val, "SITEval_DATA_FILTERED_RSHP_EnSEMBLE
 if (file.exists(total_flux_file)) {
   message("Loading ", total_flux_file)
   load(total_flux_file)   # provides SITEval_DATA_FILTERED_RSHPc_H_total (has FG_total)
+  SITEval_DATA_FILTERED_RSHPc_H_total <- purrr::imap(
+    SITEval_DATA_FILTERED_RSHPc_H_total, validation_flux_to_umol)
 } else if (file.exists(ensemble_file)) {
   message("SITEval_DATA_FILTERED_RSHP_EnSEMBLE_TotalFlux.Rdata not found — ",
           "falling back to FG_mean (no storage flux term). Run 02b_VAL_TotalFlux.R for FG_total.")
@@ -145,19 +152,16 @@ if (file.exists(total_flux_file)) {
 # reconstruction fallbacks don't have a storage term, so FG_total is set
 # equal to FG_mean in those cases (storage_added = FALSE throughout).
 if (!exists("SITEval_DATA_FILTERED_RSHPc_H_total")) {
-  SITEval_DATA_FILTERED_RSHPc_H_total <- purrr::map(
+  SITEval_DATA_FILTERED_RSHPc_H_total <- purrr::imap(
     SITEval_DATA_FILTERED_RSHPc_H,
-    ~ dplyr::mutate(.x, FG_total = FG_mean, storage_added = FALSE)
+    ~ dplyr::mutate(validation_flux_to_umol(.x, .y),
+                    FG_total = FG_mean, storage_added = FALSE)
   )
 }
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-# FG_total and EC_mean are in µmol CH4 m⁻² s⁻¹ (same units as NEON flux_total).
-# Conversion to mg C m⁻² 30min⁻¹ follows NEON convention:
-#   2 × 0.0000288872 × 1000  =  µmol/s × (1800 s/30min) × (12 µg C/µmol) / (1e6 µg/g) × (1e3 mg/g)
-#
-# If FG_mean is in different units at your sites, update flux_to_mgC_30min accordingly.
-flux_to_mgC_30min <- 2 * 0.0000288872 * 1000   # mg C m⁻² 30min⁻¹ per (µmol m⁻² s⁻¹)
+# Inputs are explicitly normalized above; total files must carry unit metadata.
+flux_to_mgC_30min <- ch4_rate_to_mgC(1, input_unit = "umol", seconds = 1800)
 seconds_per_30min <- 30 * 60
 ug_c_per_umol_c   <- 12.011
 behavior_levels   <- c("Consistent sink", "Fluctuating", "Consistent source")

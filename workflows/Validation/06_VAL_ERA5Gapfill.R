@@ -53,7 +53,6 @@ if (!file.exists(model_data_file))
   stop("Missing: ", model_data_file, "\nRun flow.30min.analysis.VAL.R first.")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-flux_to_mgC_30min       <- 2 * 0.0000288872 * 1000
 seconds_per_30min       <- 30 * 60
 ug_c_per_umol_c         <- 12.011
 min_training_obs        <- 50L    # minimum obs to include a site in RF training
