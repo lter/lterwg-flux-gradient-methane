@@ -14,33 +14,40 @@
 #     No hard threshold; probability-weighted blend.
 #
 #   Approach 2 — Dichotomous:
-#     Hard threshold at P(source) ≥ 0.5; assigns cell entirely to source or sink flux.
+#     Hard threshold at the bundle's binary_threshold (currently 0.5); assigns
+#     cell entirely to source or sink flux. A separate nested monthly audit
+#     supports ~0.85 for forest only. Uniform 0.85 is a transfer sensitivity,
+#     not yet a production change, and must be re-evaluated after NEON flux
+#     gapfills are recalculated.
 #
 #   Approach 3 — All-Sink (theoretical maximum sink):
 #     Every upland cell is assigned the sink magnitude regardless of
 #     P(source). This represents the most extreme possible terrestrial sink
 #     estimate derivable from ecosystem-scale observations.
 #     A GMB threshold sensitivity sweep (0.30–0.99) is retained as a diagnostic
-#     showing that even forcing all cells to sinks never recovers the GMB target.
+#     comparing threshold choices with the GMB target.
 #
 # "Arid" is classified here the SAME way 12_SourceProp_MagnitudeModels.R
 # classified it for training — aridity_index < arid_ai_threshold (loaded
 # from the model bundle, not redefined here) — not the biome/MODIS raster's
 # own "desert" class. P(source) IS hard-forced to 0 for Arid cells: the
 # only 2 NEON sites crossing this threshold (JORN, SRER) are empirically
-# 100% weak-source, an unrepresentative sample for learning a genuine
+# net sources on average; the forced direction is an explicit scenario.
+# With this limited arid sample, the workflow does not learn an Arid-specific
 # P(source) pattern, so 12_SourceProp_MagnitudeModels.R excludes Arid from
 # Stage 1 and Stage 2's source model entirely and this script asserts that
 # design (model_bundle$arid_forced_sink) rather than assuming it. Arid
 # cells are instead routed deterministically through the sink magnitude
-# model, which extrapolates from Forest/Grassland/Shrubland sink behavior
-# via the shared continuous covariates.
+# analog method: dry weak-sink donors matched by climate and season, with
+# explicit dry-donor mean fallbacks when support is insufficient.
 #
 # Outputs: /Volumes/MaloneLab/Research/FluxGradient/METHANE/Upscaling_Monthly_RF/OUTPUT/
 
 library(tidyverse)
 library(terra)
 library(ranger)
+source(file.path(if (exists("DirRepo.ch4")) DirRepo.ch4 else ".",
+                 "functions/dry_sink_analogs.R"))
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -108,6 +115,8 @@ model_bundle <- readRDS(model_bundle_file)
 rf_model_A              <- model_bundle$rf_model_A
 iso_cal_A                <- model_bundle$iso_cal_A
 sink_mag_model            <- model_bundle$sink_mag_model
+dry_sink_analog_model     <- model_bundle$dry_sink_analog_model
+if (is.null(dry_sink_analog_model)) stop("Refit step 12 to create the dry weak-sink analog model.")
 source_mag_model          <- model_bundle$source_mag_model
 magnitude_standardizers    <- model_bundle$magnitude_standardizers
 training_vswc_range        <- model_bundle$training_vswc_range
@@ -347,22 +356,9 @@ for (year in years_to_process) {
     dat <- apply_standardizers(dat, magnitude_standardizers)
 
     # ── Stage 1: predict Model A ──────────────────────────────────────────────
-    # Arid cells ARE hard-forced to P(source) = 0. rf_model_A never trained
-    # on Arid data at all (12_SourceProp_MagnitudeModels.R excludes it from
-    # Stage 1 entirely), because the only 2 NEON sites crossing the
-    # aridity_index threshold (JORN, SRER) are empirically 100% weak-source
-    # -- the opposite of the standard "arid soils are net CH4 sinks" prior --
-    # so there's no trustworthy basis for a learned Arid P(source). Rather
-    # than let rf_model_A extrapolate onto a level it never saw, Arid is
-    # routed deterministically to the sink magnitude model instead, which
-    # itself excludes Arid's own site-months and predicts Arid cells by
-    # extrapolating from Forest/Grassland/Shrubland sink behavior via the
-    # shared continuous covariates. source_mag_model is still evaluated
-    # below (dat$predicted_source_flux) for every cell for code simplicity,
-    # but it's multiplied by source_prob_A = 0 for Arid cells in the
-    # Continuous approach below, and Approach 2's P >= binary_threshold
-    # dichotomous rule never fires for Arid either, so Arid never actually
-    # receives a source-model flux value in any approach.
+    # Arid direction is deliberately forced to sink for the extreme scenario.
+    # Magnitudes are empirical dry weak-sink analogs below; non-Arid cells
+    # retain the fitted sink/source RF magnitude models.
     dat$source_prob_A_raw <- predict_rf_prob(rf_model_A, dat)
     dat$source_prob_A     <- if_else(dat$is_arid == 1, 0,
                                      calibrate_isotonic(iso_cal_A, dat$source_prob_A_raw))
@@ -370,18 +366,35 @@ for (year in years_to_process) {
     # Stage 2 uses Model A probability as predictor
     dat <- dat %>% mutate(source_probability = source_prob_A)
     dat$predicted_sink_flux   <- pmin(predict_rf_magnitude(sink_mag_model,   dat), 0)
+    dat$dry_sink_method <- "not_forced_arid"
+    dat$dry_sink_climate_supported <- NA
+    dat$dry_sink_season_matched <- NA
+    arid_rows <- which(dat$is_arid == 1L)
+    if (length(arid_rows)) {
+      analog <- predict_dry_sink_analogs(dry_sink_analog_model, dat[arid_rows, ])
+      dat$predicted_sink_flux[arid_rows] <- analog$flux
+      dat$dry_sink_method[arid_rows] <- analog$method
+      dat$dry_sink_climate_supported[arid_rows] <- analog$climate_supported
+      dat$dry_sink_season_matched[arid_rows] <- analog$season_matched
+    }
     dat$predicted_source_flux <- pmax(predict_rf_magnitude(source_mag_model, dat), 0)
 
     monthly_cell_predictions[[idx]] <- dat %>%
       select(Year, cell, x, y, month, EcoType, is_arid, area_mha,
              inundation_fraction, upland_area_fraction,
              source_prob_A,
-             predicted_sink_flux, predicted_source_flux)
+             predicted_sink_flux, predicted_source_flux,
+             dry_sink_method, dry_sink_climate_supported, dry_sink_season_matched)
     idx <- idx + 1L
   }
 }
 
 cell_preds <- bind_rows(monthly_cell_predictions)
+dry_sink_support <- cell_preds %>% filter(is_arid == 1L) %>%
+  group_by(Year, month, dry_sink_method, dry_sink_climate_supported, dry_sink_season_matched) %>%
+  summarise(sink_tg_CH4 = sum(gC_m2_yr_to_tg_ch4(predicted_sink_flux, area_mha)),
+    area_mha = sum(area_mha), n_cells = n(), .groups = "drop")
+write.csv(dry_sink_support, file.path(output_dir, "forced_arid_dry_sink_support.csv"), row.names = FALSE)
 
 # ── Approach 1: Continuous ────────────────────────────────────────────────────
 # flux = P_A × source_mag + (1 − P_A) × sink_mag (no hard threshold)
@@ -409,7 +422,11 @@ cell_preds <- cell_preds %>%
   )
 
 # ── GMB threshold sensitivity (diagnostic, decoupled from Approach 3) ─────────
-# Sweep P(source) thresholds 0.30–0.99 to show the budget never reaches −35.
+# Sweep uniform P(source) thresholds 0.30–0.99 to show the budget never reaches −35.
+# This diagnostic is distinct from the nested, monthly, ecosystem threshold
+# audit in workflows/check/SourceProbability_NestedThreshold_LOSO.R and its
+# budget application script. Do not interpret a uniform threshold sweep as
+# evidence that NEON validates a global threshold for every ecosystem.
 
 message("Running GMB threshold sensitivity sweep (diagnostic)...")
 gmb_sensitivity <- map_dfr(gmb_threshold_grid, function(p) {

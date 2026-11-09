@@ -24,14 +24,11 @@
 # analyses can subset to storage-corrected rows only if a stricter
 # comparison is wanted.
 #
-# Units (per project decision): SITE_storage_flux_1pt.csv reports
-# storage_flux_1pt in nmol CH4 m-2 s-1; FG_mean/EC_mean are treated as
-# umol CH4 m-2 s-1 per 05_VAL_FluxAnalysis.R, so storage is divided by 1000
-# before being added. Caveat: after this conversion storage is a small
-# correction relative to FG_mean (median contribution well under 1% at all
-# three sites) -- worth double-checking this units assumption against the
-# raw NEON/AmeriFlux source before relying on it for the paper, since it
-# makes the storage correction close to negligible.
+# Units (corrected Oct 2026): SITE_storage_flux_1pt.csv reports storage_flux_1pt in nmol CH4 m-2 s-1 at
+# all three sites (SE-Sto's ppm profile is converted to ppb upstream in flow.validation.storage.R), so storage
+# is divided by 1000. FG_mean and EC_mean are converted to umol CH4 m-2 s-1 per site with val_ch4_to_umol
+# below (SE-Svb and US-Uaf were in nmol); before this, nmol FG was added to umol storage at those two sites,
+# which is why storage looked negligible there.
 #
 # SE-Sto note: dry_air_concentration for SE-Sto was previously ~100x too
 # small due to two raw-unit bugs (see apply_site_unit_corrections() in
@@ -49,13 +46,22 @@ library(tidyverse)
 load(fs::path(localdir.ch4, "SITEval_DATA_FILTERED_RSHP_EnSEMBLE.Rdata"))
 load(fs::path(localdir.ch4, "Storage_Flux/SinglePoint/Validation_storage_singlepoint.RData"))
 
+# Validation-site CH4 flux units (checked Oct 2026 against the data): the harmonized SE-Svb and US-Uaf
+# profiles are in ppb, so their FG_mean is nmol CH4 m-2 s-1, and their EC fluxes (ch4_flux_nmolm2s, CH4.flux)
+# are nmol too; SE-Sto's profiles and EC (Fch4) are in ppm / umol. Everything is converted to umol CH4 m-2 s-1.
+if (!exists("val_ch4_to_umol")) val_ch4_to_umol <- c("SE-Sto" = 1, "SE-Svb" = 1e-3, "US-Uaf" = 1e-3)
+
 site.list <- names(SITEval_DATA_FILTERED_RSHPc_H)
 
 SITEval_DATA_FILTERED_RSHPc_H_total <- list()
 
 for (site in site.list) {
 
-  flux.site <- SITEval_DATA_FILTERED_RSHPc_H[[site]]
+  if (!site %in% names(val_ch4_to_umol)) stop("No CH4 unit factor for validation site ", site)
+  flux.site <- SITEval_DATA_FILTERED_RSHPc_H[[site]] %>%
+    mutate(FG_mean = FG_mean * val_ch4_to_umol[[site]],
+           EC_mean = EC_mean * val_ch4_to_umol[[site]],
+           flux_units = "umol m-2 s-1")
 
   flux.storage.site <- Validation_storage_singlepoint[[site]] %>%
     mutate(storage_flux_filled_umol = storage_flux_1pt / 1000) %>%

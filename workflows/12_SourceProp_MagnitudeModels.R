@@ -26,33 +26,14 @@
 #       magnitude_model_fluxnet_external_validation.csv and
 #       magnitude_model_fluxnet_validation_text.md.
 #
-# "Arid" (aridity_index < arid_ai_threshold — the same rule used in
-# 19_Supp_NEONRepresentativeness.R) is a genuine, data-driven EcoType level
-# used for LABELING and as a Stage 2 predictor, but it is deliberately NOT
-# modeled by Stage 1. Only 2 NEON sites cross this threshold (JORN, SRER),
-# and empirically ALL 84 of their site-months are observed weak-SOURCE
-# (positive flux) -- the opposite of the standard ecological expectation
-# that dryland/desert soils are net atmospheric CH4 sinks via methanotrophic
-# oxidation. With only 2 sites, both showing what looks like anomalous
-# behavior relative to that prior, there isn't enough independent evidence
-# to trust a learned Arid-specific P(source) pattern, so Arid is instead
-# handled deterministically:
-#   - Stage 1 (P(source) classifier) excludes Arid site-months from
-#     training entirely, and P(source) is hard-forced to 0 for Arid cells
-#     at prediction time (13_Global_SpatialUpscalingRF.R) rather than using
-#     whatever rf_model_A would extrapolate for a level it never trained on.
-#   - Stage 2's SOURCE magnitude model excludes Arid site-months too, since
-#     Arid never reaches it (P(source) = 0 always routes to the sink model).
-#   - Stage 2's SINK magnitude model also excludes Arid's own site-months
-#     (all 84 are source-labeled, so none would qualify as sink training
-#     data anyway) and instead predicts Arid cells by extrapolating from
-#     Forest/Grassland/Shrubland sink behavior using the shared continuous
-#     covariates (temperature, soil moisture, MAT/MAP) -- "borrowing
-#     strength" from the other ecosystem types' sink response rather than
-#     learning an Arid-specific one from 2 anomalous-looking sites.
-# 13_Global_SpatialUpscalingRF.R must apply this identical scheme (Arid ==
-# aridity_index-based, P(source) forced 0, sink-model-only) at prediction
-# time for this to be consistent between training and the global grid.
+# Arid cells (aridity index < 15) retain forced P(source)=0 as an extreme
+# scenario. The general source/sink RFs exclude Arid training rows.
+# Forced-arid magnitudes instead use complete dry weak-uptake months
+# (aridity index <=20), including actual uptake months at Arid sites.
+# Climate/season analogs and flagged dry-mean fallbacks are implemented in
+# functions/dry_sink_analogs.R. A scenario assignment may use that site's
+# own uptake months; the separate 12c diagnostic excludes the held-out site
+# from its fold-specific donor pool.
 #
 # Outputs:
 #   OUTPUT/source_magnitude_model_bundle.rds — everything
@@ -68,9 +49,8 @@
 #   OUTPUT/comparison_magnitude_skill.csv
 #   OUTPUT/magnitude_model_skill.csv
 #   OUTPUT/magnitude_model_fitted_values.csv
-#   OUTPUT/magnitude_model_arid_forced_sink_check.csv — Arid's own 84
-#     site-months (never in either magnitude model's training data),
-#     observed flux vs. what the sink model predicts for them
+#   OUTPUT/magnitude_model_arid_forced_sink_check.csv — observed monthly
+#     flux vs. forced dry-analog assignment, with matching support flags
 #   OUTPUT/magnitude_model_predicted_annual_flux_by_site.csv
 #   OUTPUT/magnitude_model_fluxnet_external_validation.csv
 #   OUTPUT/magnitude_model_fluxnet_validation_text.md
@@ -83,6 +63,8 @@ library(tidyverse)
 library(data.table)
 library(ranger)
 library(cowplot)
+source(file.path(if (exists("DirRepo.ch4")) DirRepo.ch4 else ".",
+                 "functions/dry_sink_analogs.R"))
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Deliberately does NOT depend on spatial_dir/ecoregions/ERA5-Land/MODIS/WAD2M
@@ -119,7 +101,10 @@ if (length(missing_files) > 0) stop("Missing: ", paste(missing_files, collapse =
 # instead of redefining its own copies — the two scripts drifting apart on
 # a value like this is exactly how the Arid-category bug happened before.
 
-binary_threshold  <- 0.5   # fixed threshold for Stage 1 classification skill / Approach 2
+binary_threshold  <- 0.5   # production cutoff for Stage 1 classification skill / Approach 2
+# Nested monthly LOSO diagnostics currently suggest ~0.85 for forest only;
+# uniform 0.85 across ecosystems is a transfer sensitivity, not yet adopted.
+# Reassess after the NEON gapfilled-flux inputs are recalculated.
 arid_ai_threshold <- 15
 # aridity_index = MAP / (MAT + 10) is numerically degenerate as MAT
 # approaches -10 C from above (denominator -> 0), producing spuriously
@@ -323,6 +308,7 @@ era5_30min <- data.table::fread(era5_30min_file) %>% as_tibble() %>%
 monthly_training <- era5_30min %>%
   reframe(.by = c(SITE_ID, EcoType, Year, month),
     monthly_budget_mgC_m2  = sum(gapfilled_CH4_mgC_30min, na.rm = TRUE),
+    n_finite_halfhours = sum(is.finite(gapfilled_CH4_mgC_30min)),
     mean_ERA5_Tair_C        = mean(ERA5_Tair_C, na.rm = TRUE),
     mean_ERA5_VSWC          = mean(ERA5_VSWC,   na.rm = TRUE)) %>%
   left_join(upland_sites, by = c("SITE_ID","EcoType")) %>%
@@ -334,18 +320,8 @@ monthly_training <- era5_30min %>%
     # See aridity_mat_floor above.
     aridity_index            = if_else(MAT > aridity_mat_floor, MAP / (MAT + 10), NA_real_),
     is_arid                  = as.integer(!is.na(aridity_index) & aridity_index < arid_ai_threshold),
-    # Arid label uses the same aridity_index < arid_ai_threshold rule used
-    # throughout (incl. 19_Supp_NEONRepresentativeness.R). No NEON site is
-    # literally labeled "Arid" in site metadata; the ~2 sites crossing this
-    # threshold (JORN, SRER) are relabeled here purely for BOOKKEEPING and
-    # as a Stage 2 predictor level — NOT so Stage 1 fits an Arid-specific
-    # P(source) pattern. See the header note: both of those sites' data show
-    # 100% weak-source months, contradicting the expectation that arid soils
-    # are net sinks, so Stage 1 training deliberately EXCLUDES is_arid==1
-    # rows below rather than learning from what looks like an unrepresentative
-    # 2-site sample. 13_Global_SpatialUpscalingRF.R must classify Arid the
-    # SAME way (aridity_index-based) and force P(source) = 0 for it, so
-    # training and the grid agree on what "Arid" means and how it's routed.
+    # Shared forced-Arid classification; actual negative Arid months may
+    # contribute to the separate dry-uptake donor pool.
     EcoType                  = factor(if_else(is_arid == 1, "Arid", as.character(EcoType)),
                                       levels = c("Forest","Grassland","Shrubland","Arid"))
   ) %>%
@@ -458,13 +434,10 @@ mag_predictors <- c("z_Tair","z_VSWC","z_MAP","z_MAT","source_probability","is_a
 #     (P(source) is hard-forced to 0 above), so training on it would only
 #     bias the model toward a class it will never actually be asked to
 #     predict for.
-#   - sink_mag_data: excluding it is a no-op in practice (all 84 Arid
-#     site-months are weak-source, so none would pass this filter anyway)
-#     but is stated explicitly so future data updates can't silently start
-#     feeding Arid's own (observed-as-source) months into the sink model.
-#     Arid grid cells are instead predicted by extrapolating from
-#     Forest/Grassland/Shrubland sink behavior via the shared continuous
-#     covariates (z_Tair/z_VSWC/z_MAP/z_MAT) — see the header note.
+#   - sink_mag_data: excludes Arid rows from the general RF. Actual Arid
+#     uptake months can enter the separate dry analog pool below.
+#     Arid grid cells instead receive dry weak-sink climate/season analogs
+#     from functions/dry_sink_analogs.R, not this general sink RF.
 sink_mag_data   <- monthly_training %>% filter(EcoType != "Arid", weak_source == 0, monthly_flux_gC_m2_month <= 0)
 source_mag_data <- monthly_training %>% filter(EcoType != "Arid", weak_source == 1, monthly_flux_gC_m2_month >  0)
 
@@ -494,27 +467,27 @@ magnitude_fitted_values <- bind_rows(
            fitted_flux = pmax(oob_predict_rf_magnitude(source_mag_model), 0))
 ) %>% rename(fitted_flux_gC_m2_month = fitted_flux)
 
-# ── Arid diagnostic: forced-sink prediction vs. observed ──────────────────────
-# Arid site-months are excluded from BOTH magnitude models' training (see
-# above), but 13_Global_SpatialUpscalingRF.R still routes Arid grid cells
-# through sink_mag_model exclusively (P(source) forced to 0). This reports
-# what that forced routing would predict for JORN/SRER's own 84 site-months
-# -- a genuine holdout prediction, since neither site ever appears in
-# sink_mag_model's training data -- against what was actually observed, so
-# the cost of this design choice is visible rather than hidden rather than
-# just asserted. Folded into predicted_annual_flux_by_site/fluxnet_validation
-# below so the FLUXNET comparison still covers all NEON upland sites.
+# Forced-arid diagnostic: dry weak-sink climate/season analogs, independently
+# of the source sign observed at JORN/SRER. Donors are exported for review.
 arid_mag_data <- monthly_training %>% filter(EcoType == "Arid")
+dry_sink_analog_model <- fit_dry_sink_analogs(monthly_training)
+dry_sink_donor_table <- dry_sink_analog_model$donors
+write.csv(dry_sink_donor_table, file.path(output_dir, "dry_weak_sink_analog_donors.csv"), row.names = FALSE)
+arid_analog_predictions <- predict_dry_sink_analogs(dry_sink_analog_model, arid_mag_data)
 arid_sink_prediction_check <- arid_mag_data %>%
   mutate(
-    forced_sink_prediction_gC_m2_month = pmin(predict_rf_magnitude(sink_mag_model, arid_mag_data), 0),
+    forced_sink_prediction_gC_m2_month = arid_analog_predictions$flux,
+    analog_method = arid_analog_predictions$method,
+    analog_climate_supported = arid_analog_predictions$climate_supported,
+    analog_season_matched = arid_analog_predictions$season_matched,
     observed_flux_gC_m2_month          = monthly_flux_gC_m2_month
   ) %>%
   select(SITE_ID, EcoType, Year, month,
-         observed_flux_gC_m2_month, forced_sink_prediction_gC_m2_month)
+         observed_flux_gC_m2_month, forced_sink_prediction_gC_m2_month,
+         analog_method, analog_climate_supported, analog_season_matched)
 
 message(sprintf(
-  "Arid forced-sink check: %d site-months (JORN/SRER) -- mean observed = %.3f, mean forced-sink prediction = %.3f g C m-2 mo-1 (neither site was ever in sink_mag_model's training data)",
+  "Arid forced-sink check: %d site-months (JORN/SRER) -- mean observed = %.3f, mean dry-analog forced-sink prediction = %.3f g C m-2 mo-1 (scenario assignment; held-out-site diagnostic is in step 12c)",
   nrow(arid_sink_prediction_check),
   mean(arid_sink_prediction_check$observed_flux_gC_m2_month),
   mean(arid_sink_prediction_check$forced_sink_prediction_gC_m2_month)))
@@ -557,7 +530,7 @@ predicted_annual_flux_by_site <- bind_rows(
       predicted_annual_gC_m2_yr = mean(forced_sink_prediction_gC_m2_month, na.rm = TRUE) * 12,
       .groups = "drop"
     ) %>%
-    mutate(prediction_basis = "Forced-sink (Arid, never in training)")
+    mutate(prediction_basis = "Forced-sink dry-analog scenario (may include own uptake months)")
 )
 
 fluxnet_validation <- predicted_annual_flux_by_site %>%
@@ -625,6 +598,7 @@ model_bundle <- list(
   iso_cal_A                = iso_cal_A,
   class_predictors          = class_predictors,
   sink_mag_model            = sink_mag_model,
+  dry_sink_analog_model     = dry_sink_analog_model,
   source_mag_model          = source_mag_model,
   mag_predictors             = mag_predictors,
   magnitude_standardizers    = magnitude_standardizers,
@@ -635,7 +609,7 @@ model_bundle <- list(
   aridity_mat_floor           = aridity_mat_floor,
   binary_threshold            = binary_threshold,
   # Arid is excluded from Stage 1 and Stage 2's source model, and forced to
-  # P(source) = 0 / sink-model-only at prediction time — see the header note
+  # P(source) = 0 / dry-analog uptake at prediction time — see the header note
   # (empirically, both NEON Arid-analog sites are 100% weak-source, an
   # unrepresentative 2-site sample for learning a P(source) pattern).
   # 13_Global_SpatialUpscalingRF.R reads this flag and asserts it's TRUE

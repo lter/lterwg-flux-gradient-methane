@@ -49,7 +49,8 @@ load(soil_input_file)
 ch4_option <- "flux_total"
 gradient_option <- "FG_ENSEMBLE_RSHP"
 storage_option <- "storage_flux_filled"
-flux_to_mgC_30min <- 2 * 0.0000288872 * 1000
+flux_to_mgC_30min <- 1800 * 12.011 / 1000  # mg C m-2 per 30 min per (umol CH4 m-2 s-1) = 21.62
+# (was 2 * 0.0000288872 * 1000 = 0.0578: g CH4 per nmol, per hour - 374x too small; corrected Oct 2026)
 seconds_per_30min <- 30 * 60
 ug_c_per_umol_c <- 12.011
 scale_levels <- c("30 min", "Daily", "Annual scaled")
@@ -165,7 +166,6 @@ ch4_30min <- purrr::imap_dfr(SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_storage, fun
     is.finite(CH4_mgC_30min),
     is.finite(hour_num),
     is.finite(Tair_C),
-    is.finite(VSWCMean),
     is.finite(log_PAR),
     !is.na(season),
     !is.na(EcoType),

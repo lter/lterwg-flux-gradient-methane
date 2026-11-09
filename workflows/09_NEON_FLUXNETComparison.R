@@ -34,12 +34,12 @@ if (!dir.exists("FIGURES")) dir.create("FIGURES", recursive = TRUE)
 message("OUTPUT writable: ",  file.access("OUTPUT",  mode = 2) == 0)
 message("FIGURES writable: ", file.access("FIGURES", mode = 2) == 0)
 
-site_behavior_file <- "OUTPUT/30min_site_behavior.csv"
+site_behavior_file <- "OUTPUT/NEON_scale_annual_budget_summary.csv"
 era5_annual_budget_file <- "OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv"
 era5_mean_annual_budget_file <- "OUTPUT/NEON_ERA5_gapfilled_mean_annual_budget.csv"
 
 if (!file.exists(site_behavior_file)) {
-  stop("Missing OUTPUT/30min_site_behavior.csv. Run flow.30min.analysis.R first.")
+  stop("Missing ", site_behavior_file, ". Run 05_NEON_FluxAnalysis.R first.")
 }
 
 if (!file.exists(era5_annual_budget_file)) {
@@ -581,8 +581,9 @@ aridity_mat_floor <- -9  # deg C; see 12_SourceProp_MagnitudeModels.R for ration
 site_behavior <- read.csv(site_behavior_file) %>%
   mutate(
     SITE_ID = as.character(SITE_ID),
-    CH4_behavior = factor(CH4_behavior, levels = behavior_levels),
-    CH4_gradient_behavior = factor(CH4_gradient_behavior, levels = behavior_levels),
+    CH4_behavior = factor(behavior_annual_scaled, levels = behavior_levels),
+    # Step 05 now reports total-flux annual classes; ERA5 classes take priority below.
+    CH4_gradient_behavior = factor(NA_character_, levels = behavior_levels),
     MAP = as.numeric(MAP),
     MAT = as.numeric(MAT),
     aridity_index = if_else(MAT > aridity_mat_floor, MAP / (MAT + 10), NA_real_),
@@ -613,7 +614,7 @@ era5_mean_annual_budget <- read.csv(era5_mean_annual_budget_file) %>%
   )
 
 # NEON's own EcoType field only ever takes: Cropland, Forest, Grassland,
-# Shrubland, Wetland (confirmed directly from OUTPUT/30min_site_behavior.csv)
+# Shrubland, Wetland (from OUTPUT/NEON_scale_annual_budget_summary.csv)
 # -- no NEON site is literally "Tundra," "Desert," "Lake," or "Urban," so
 # this stays a simple scalar mapping (no multi-category duplication needed
 # here, unlike assign_reference_ecosystem_groups() for the literature/model
@@ -892,7 +893,7 @@ reference_lines <- c(
   "NEON values are from this repository's ERA5-gapfilled annual gradient/tower flux output: OUTPUT/NEON_ERA5_gapfilled_annual_budget_by_year.csv and OUTPUT/NEON_ERA5_gapfilled_mean_annual_budget.csv.",
   "Annual ERA5 budgets retained observed half-hourly gradient/tower fluxes where available and filled missing half-hours with predictions from the ERA5-driven GAM in NEON.ERA5.HalfHourlyGapfill.R.",
   "Annual budgets in g C m-2 yr-1 were converted to daily rates as annual budget * 1000 / 365 = mg C m-2 d-1.",
-  "NEON points in the figure are site-level medians across ERA5-gapfilled site-years. NEON class summaries are grouped by ERA5 annual behavior class when available, with gradient/total behavior classes from OUTPUT/30min_site_behavior.csv as fallbacks.",
+  "NEON points in the figure are site-level medians across ERA5-gapfilled site-years. NEON class summaries use ERA5 annual behavior classes, with total-flux annual classes from OUTPUT/NEON_scale_annual_budget_summary.csv as fallbacks.",
   coverage_note,
   "",
   "## Output tables",

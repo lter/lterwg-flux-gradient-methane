@@ -4,7 +4,7 @@ DIEL.season.ch4 <- function( dataframe, flux, Gas){
   
   dataframe <- dataframe %>% as.data.frame %>% rename( timeEndA.local = time.rounded)
 
-    dataframe$flux <- (dataframe[, flux]*2) *0.0000288872 # g C 30 minutes
+    dataframe$flux <- dataframe[, flux] * 1800 * 12.011e-6 # g C m-2 per 30 minutes from umol CH4 m-2 s-1 (was *2*0.0000288872, 374x too small)
   
   # Make sure season is in the dataframe:
   dataframe.gs <- dataframe %>% 

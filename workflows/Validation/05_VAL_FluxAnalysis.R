@@ -150,14 +150,32 @@ if (!exists("SITEval_DATA_FILTERED_RSHPc_H_total")) {
     ~ dplyr::mutate(.x, FG_total = FG_mean, storage_added = FALSE)
   )
 }
+# Validation-site CH4 flux units (checked Oct 2026 against the data): the harmonized SE-Svb and US-Uaf
+# profiles are in ppb, so their FG_mean is nmol CH4 m-2 s-1, and their EC fluxes (ch4_flux_nmolm2s, CH4.flux)
+# are nmol too; SE-Sto's profiles and EC (Fch4) are in ppm / umol. Everything is converted to umol CH4 m-2 s-1.
+if (!exists("val_ch4_to_umol")) val_ch4_to_umol <- c("SE-Sto" = 1, "SE-Svb" = 1e-3, "US-Uaf" = 1e-3)
+# 02b output already carries flux_units = "umol m-2 s-1"; convert anything that does not (fallback branches
+# or a TotalFlux file written before Oct 2026).
+SITEval_DATA_FILTERED_RSHPc_H_total <- purrr::imap(SITEval_DATA_FILTERED_RSHPc_H_total, function(df, site) {
+  if ("flux_units" %in% names(df) && all(df$flux_units == "umol m-2 s-1", na.rm = TRUE)) return(df)
+  if (!site %in% names(val_ch4_to_umol)) stop("No CH4 unit factor for validation site ", site)
+  f <- val_ch4_to_umol[[site]]
+  cols <- intersect(c("FG_mean", "EC_mean", "FG_total"), names(df))
+  if ("storage_flux_filled_umol" %in% names(df)) {   # old 02b output: storage already umol, FG_total mixed units
+    df$FG_mean <- df$FG_mean * f; df$EC_mean <- df$EC_mean * f
+    df$FG_total <- ifelse(df$storage_added, df$FG_mean + df$storage_flux_filled_umol, df$FG_mean)
+  } else df[cols] <- lapply(df[cols], function(v) v * f)
+  df$flux_units <- "umol m-2 s-1"
+  df
+})
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 # FG_total and EC_mean are in µmol CH4 m⁻² s⁻¹ (same units as NEON flux_total).
 # Conversion to mg C m⁻² 30min⁻¹ follows NEON convention:
-#   2 × 0.0000288872 × 1000  =  µmol/s × (1800 s/30min) × (12 µg C/µmol) / (1e6 µg/g) × (1e3 mg/g)
-#
-# If FG_mean is in different units at your sites, update flux_to_mgC_30min accordingly.
-flux_to_mgC_30min <- 2 * 0.0000288872 * 1000   # mg C m⁻² 30min⁻¹ per (µmol m⁻² s⁻¹)
+#   1800 s/30min × 12.011 µg C/µmol / 1000 µg/mg = 21.62 mg C m⁻² 30min⁻¹ per (µmol m⁻² s⁻¹)
+#   (was 2 × 0.0000288872 × 1000 = 0.0578, which is g CH4 per nmol per hour - 374x too small; corrected Oct 2026)
+# FG/EC are converted to µmol per site in 02b_VAL_TotalFlux.R (and below for the fallback branches).
+flux_to_mgC_30min <- 1800 * 12.011 / 1000   # mg C m⁻² 30min⁻¹ per (µmol m⁻² s⁻¹)
 seconds_per_30min <- 30 * 60
 ug_c_per_umol_c   <- 12.011
 behavior_levels   <- c("Consistent sink", "Fluctuating", "Consistent source")

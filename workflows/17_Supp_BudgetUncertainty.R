@@ -28,7 +28,8 @@ library(patchwork)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 rf_dir    <- "/Volumes/MaloneLab/Research/FluxGradient/METHANE/Upscaling_Monthly_RF"
-val_dir   <- "/Volumes/MaloneLab/Research/FluxGradient/METHANE"
+val_dir   <- Sys.getenv("LOCALDIR_VAL",
+  unset = "/Volumes/MaloneLab/Research/FluxGradient/Validation_Sites")
 fig_dir   <- "/Volumes/MaloneLab/Research/FluxGradient/METHANE/FIGURES"
 dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 
@@ -138,6 +139,10 @@ scenario_summary <- sensitivity %>%
     gap_to_gmb     = mean_adj_tg - gmb_target,
     .groups        = "drop"
   )
+
+write.csv(scenario_summary %>% mutate(multiplier = 1 + frac,
+            reverses_flux_sign = multiplier < 0),
+          file.path(rf_output_dir, "budget_uncertainty_scenarios.csv"), row.names = FALSE)
 
 # ── 5. Adjusted budget summary across scenarios ───────────────────────────────
 message("\nBaseline mean annual budgets (Tg CH4 yr-1) and response to ±50% correction:")
@@ -295,7 +300,10 @@ pD <- scenario_summary %>%
   theme(axis.text.x = element_text(size = 10))
 
 # ── Assemble ──────────────────────────────────────────────────────────────────
-fig_budget <- (pA | pB) / (pC | pD) 
+fig_budget <- (pA | pB) / (pC | pD) +
+  plot_annotation(caption = paste(
+    "Adjusted budget = baseline × (1 + adjustment). Adjustments below −100% reverse flux direction.",
+    "Uniform scaling stress tests do not provide a statistical uncertainty interval.", sep = "\n"))
 
 ggsave(
   file.path(fig_dir, "FigS_Budget_Uncertainty.png"),
@@ -339,25 +347,30 @@ cat(paste(strwrap(sprintf(
 
 To evaluate the potential impact of a systematic bias in flux-gradient (FG) magnitude
 estimates on the continental CH4 budget, we applied multiplicative corrections ranging
-from %+.0f%% to +50%% uniformly to all ERA5 spatially upscaled annual budgets across
+from %+.0f%% to %+.0f%% uniformly to all ERA5 spatially upscaled annual budgets across
 three modelling approaches (Continuous, Dichotomous, and All-Sink).%s
 
 At baseline (0%% correction), the Continuous approach produced a mean annual budget
 of %.1f Tg CH4 yr-1 and the All-Sink approach (every non-arid upland cell assigned
-the sink flux magnitude) produced %.1f Tg CH4 yr-1. Under the most conservative
+the sink flux magnitude) produced %.1f Tg CH4 yr-1. Under the lowest-multiplier
 scenario (%+.0f%%), the Continuous budget shifted to %.1f Tg CH4 yr-1, remaining
 net positive in %.0f%% of years, and the All-Sink budget shifted to %.1f Tg CH4 yr-1.
-The sign and broad magnitude of the upscaled source estimate are therefore insensitive
-to systematic FG biases within the range tested, and the conclusion that upland
-NEON terrestrial ecosystems constitute a net CH4 source is robust to flux-magnitude
-uncertainty of this scale.",
+Corrections below -100%% imply negative multipliers and reverse flux direction;
+these are sign-reversal stress tests, not magnitude-only bias corrections.
+A relative FG bias b is removed by dividing by (1 + b), rather than multiplying
+by (1 - b). These uniform scaling scenarios do not establish robustness to
+site-specific errors, spatial extrapolation, or model choice. %s",
   worst_frac * 100,
+  max(scenario_fracs) * 100,
   if (!is.na(obs_bias) && obs_abs > 0.03)
     sprintf(" The perturbation range was anchored on the observed mean FG-EC annual budget
-bias of %+.1f%% (SD = %.1f%%, n = %d validation sites), with scenarios extending
-to ±50%% to bound the full plausible range of systematic error.",
+bias of %+.1f%% (SD = %.1f%%, n = %d validation sites), alongside ±50%%
+scenarios. This range is a diagnostic choice, not a validated uncertainty bound.",
     obs_bias * 100, obs_bias_sd * 100, n_val_sites) else "",
   cont_base, sink_base,
-  worst_frac * 100, cont_worst, cont_worst_pos, sink_worst),
+  worst_frac * 100, cont_worst, cont_worst_pos, sink_worst,
+  if (all(scenario_summary$pct_pos_years[scenario_summary$approach == "Continuous"] == 100))
+    "The Continuous budget stays positive across the tested scenarios."
+  else "The Continuous budget changes sign across the tested scenarios; source direction is not robust across the entire tested range."),
   width = 90), collapse = "\n"))
 cat("\n")

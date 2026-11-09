@@ -649,8 +649,8 @@ p3a <- comparison_budget %>%
   geom_hline(yintercept = gmb_soil_sink_tg_ch4_yr, color = gmb_col,
              linetype = "dashed", linewidth = 0.8) +
   geom_hline(yintercept = 0, color = "grey35", linewidth = 0.35) +
-  annotate("text", x = -Inf, y = gmb_soil_sink_tg_ch4_yr - 1.5,
-           label = "GMB (−35)", hjust = 0, size = 3.0, color = gmb_col) +
+  annotate("text", x = 0.55, y = gmb_soil_sink_tg_ch4_yr,
+           label = "GMB (−35)", hjust = 0.5, vjust = 0, size = 3.0, color = gmb_col) +
   scale_fill_manual(values = approach_colors) +
   labs(title = "A.",
        x = NULL, y = "Net exchange (Tg CH₄ yr⁻¹)") +
@@ -691,8 +691,8 @@ p3c <- gmb_sensitivity %>%
                  linetype = "dotted", linewidth = 0.9),
       annotate("label", x = floor_threshold, y = budget_floor_val,
                label = sprintf("Budget floor\n%.1f Tg (P = %.2f)", budget_floor_val, floor_threshold),
-               hjust = -0.1, vjust = 0, size = 3.2, color = "black",
-               fill = "white", label.size = 0)
+               hjust = 1.05, vjust = -0.1, size = 3.2, color = "black",
+               fill = "white", linewidth = 0)
     )
   } +
   scale_x_continuous(breaks = seq(0.3, 1.0, by = 0.1)) +

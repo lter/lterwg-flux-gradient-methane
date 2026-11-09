@@ -27,33 +27,47 @@ site.list <- metadata$Site_Id.NEON %>% unique
 
 # ── NEON DATA PROCESSING ──────────────────────────────────────────────────────
 
-# 01 Filter raw NEON gradient flux data and compute QC flags
-message('Step 01: Filtering NEON data...')
-source(fs::path(DirRepo.ch4, 'workflows/01_NEON_FilterQC.R'))
+# 01-03 (Oct 2026) CH4 filter + despike + EC-free ensemble (Supplement S2 rule) on the 2021-2026 fluxes.
+# Reference = AA MBR (tracer / sign group chosen by agreement with AE/WP when a tracer shows a sign split);
+# AE/WP pairs with CCC >= 0.45 against it are rescaled (RMA) and averaged in. Writes
+# SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE.Rdata, the CH4 9-min filter files and NEON_CH4_noEC_*.csv;
+# the files it replaces are copied to METHANE/archive_2026-06_RSHP_mixedgas/ first.
+# Test on a few sites first with: sites.run <- c("KONZ","TALL")  (writes *_TEST files only); then sites.run <- NULL
+message('Steps 01-03: CH4 filter, despike and no-EC ensemble...')
+sites.run <- NULL
+source(fs::path(DirRepo.ch4, 'workflows/03_NEON_EnsembleNoEC.R'))
 
-fileSave <- fs::path(localdir.ch4, "/NEON_GradientFlux_Data_Filter/SITE_DATA_FILTERED_CH4.Rdata")
-save(SITE_DATA_FILTERED, file = fileSave)
-googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
+# Previous steps 01-03 (kept for reference; superseded Oct 2026). The old step 03 averaged FG_mean over
+# CO2, H2O and CH4 together because SITE_DATA_FILTERED was not subset to CH4.
+if (FALSE) {
+  # 01 Filter raw NEON gradient flux data and compute QC flags
+  message('Step 01: Filtering NEON data...')
+  source(fs::path(DirRepo.ch4, 'workflows/01_NEON_FilterQC.R'))
 
-fileSave <- fs::path(localdir.ch4, "/NEON_GradientFlux_Data_Filter/SITES_MBR_9min_FILTER_CH4.Rdata")
-save(SITES_MBR_9min_FILTER, file = fileSave)
-googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
+  fileSave <- fs::path(localdir.ch4, "/NEON_GradientFlux_Data_Filter/SITE_DATA_FILTERED_CH4.Rdata")
+  save(SITE_DATA_FILTERED, file = fileSave)
+  googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-fileSave <- fs::path(localdir.ch4, "/NEON_GradientFlux_Data_Filter/SITES_AE_9min_FILTER_CH4.Rdata")
-save(SITES_AE_9min_FILTER, file = fileSave)
-googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
+  fileSave <- fs::path(localdir.ch4, "/NEON_GradientFlux_Data_Filter/SITES_MBR_9min_FILTER_CH4.Rdata")
+  save(SITES_MBR_9min_FILTER, file = fileSave)
+  googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-fileSave <- fs::path(localdir.ch4, "/NEON_GradientFlux_Data_Filter/SITES_WP_9min_FILTER_CH4.Rdata")
-save(SITES_WP_9min_FILTER, file = fileSave)
-googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
+  fileSave <- fs::path(localdir.ch4, "/NEON_GradientFlux_Data_Filter/SITES_AE_9min_FILTER_CH4.Rdata")
+  save(SITES_AE_9min_FILTER, file = fileSave)
+  googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-# 02 Identify representative sensor height pairs (RSHP) using CCC for CO2/H2O
-message('Step 02: Identifying sensor height pairs...')
-source(fs::path(DirRepo.ch4, 'workflows/02_NEON_SensorHeightPairs.R'))
+  fileSave <- fs::path(localdir.ch4, "/NEON_GradientFlux_Data_Filter/SITES_WP_9min_FILTER_CH4.Rdata")
+  save(SITES_WP_9min_FILTER, file = fileSave)
+  googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-# 03 Ensemble gap-fill the gradient fluxes across methods
-message('Step 03: Ensemble gap-filling...')
-source(fs::path(DirRepo.ch4, 'workflows/03_NEON_EnsembleGapfill.R'))
+  # 02 Identify representative sensor height pairs (RSHP) using CCC for CO2/H2O
+  message('Step 02: Identifying sensor height pairs...')
+  source(fs::path(DirRepo.ch4, 'workflows/02_NEON_SensorHeightPairs.R'))
+
+  # 03 Ensemble gap-fill the gradient fluxes across methods
+  message('Step 03: Ensemble gap-filling...')
+  source(fs::path(DirRepo.ch4, 'workflows/03_NEON_EnsembleGapfill.R'))
+}
 
 # 04 Combine ensemble gradient flux with storage flux to get total flux
 message('Step 04: Computing total flux...')
@@ -62,6 +76,9 @@ source(fs::path(DirRepo.ch4, 'workflows/04_NEON_TotalFlux.R'))
 # ── SITE-LEVEL ANALYSIS ───────────────────────────────────────────────────────
 
 # 05 30-min flux analysis: standardized means, daily totals, annual budgets
+# Refresh monthly soil covariates to cover the current flux record (requires NEON_TOKEN).
+message('Updating missing NEON soil-moisture covariates...')
+source(fs::path(DirRepo.ch4, 'workflows/00_NEON_UpdateSoilMoisture.R'))
 message('Step 05: 30-min flux analysis...')
 source(fs::path(DirRepo.ch4, 'workflows/05_NEON_FluxAnalysis.R'))
 

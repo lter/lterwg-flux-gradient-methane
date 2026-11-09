@@ -39,21 +39,10 @@
 # a held-out-site basis would defeat the purpose of using all available
 # NEON data operationally.
 #
-# Arid handling mirrors 12_SourceProp_MagnitudeModels.R's production design
-# exactly, per-fold: only 2 NEON sites (JORN, SRER) cross the aridity_index
-# < arid_ai_threshold "Arid" definition, and both are empirically 100%
-# weak-source — an unrepresentative sample for a learned P(source) pattern.
-# So in every fold, Stage 1 and the source-magnitude model are refit
-# EXCLUDING Arid site-months entirely, and source_probability is forced to 0
-# for Arid rows rather than taken from the fold's Stage 1 model. When the
-# HELD-OUT site itself is Arid (JORN or SRER), its test months are scored
-# against the fold's sink-magnitude model directly (labeled "Weak-sink
-# (forced, Arid)"), regardless of their own observed sign — matching how
-# 13_Global_SpatialUpscalingRF.R actually treats Arid cells, rather than
-# testing a probabilistic routing the production pipeline never uses. This
-# is still a genuine holdout: that fold's sink model never saw ANY Arid
-# site's months (not even the one still in "training", since Arid is
-# excluded from all Stage 2 training regardless of fold).
+# Arid handling mirrors production: force sink direction and rebuild the
+# dry weak-uptake donor pool from training sites only. All months of the
+# held-out site are excluded, including any uptake months. This measures
+# disagreement with the forced scenario, not confirmation of sink direction.
 #
 # Outputs:
 #   OUTPUT/magnitude_model_loso_predictions.csv       — every held-out
@@ -75,6 +64,8 @@ library(tidyverse)
 library(data.table)
 library(ranger)
 library(cowplot)
+source(file.path(if (exists("DirRepo.ch4")) DirRepo.ch4 else ".",
+                 "functions/dry_sink_analogs.R"))
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Same raw inputs as 12_SourceProp_MagnitudeModels.R — this script rebuilds
@@ -222,6 +213,7 @@ era5_30min <- data.table::fread(era5_30min_file) %>% as_tibble() %>%
 monthly_training <- era5_30min %>%
   reframe(.by = c(SITE_ID, EcoType, Year, month),
     monthly_budget_mgC_m2  = sum(gapfilled_CH4_mgC_30min, na.rm = TRUE),
+    n_finite_halfhours = sum(is.finite(gapfilled_CH4_mgC_30min)),
     mean_ERA5_Tair_C        = mean(ERA5_Tair_C, na.rm = TRUE),
     mean_ERA5_VSWC          = mean(ERA5_VSWC,   na.rm = TRUE)) %>%
   left_join(upland_sites, by = c("SITE_ID","EcoType")) %>%
@@ -325,9 +317,12 @@ run_loso_fold <- function(train_data, test_data, fold_site) {
       message(sprintf("  %s: Arid fold has no sink model to force predictions through — fold skipped.", fold_site))
       return(NULL)
     }
+    dry_model_f <- fit_dry_sink_analogs(train_data)
+    stopifnot(!fold_site %in% dry_model_f$donors$SITE_ID)
+    dry_prediction_f <- predict_dry_sink_analogs(dry_model_f, test_data)
     return(test_data %>%
       mutate(magnitude_model = "Weak-sink (forced, Arid)",
-             predicted_flux_gC_m2_month = pmin(predict_rf_magnitude(sink_model_f, test_data), 0)) %>%
+             predicted_flux_gC_m2_month = dry_prediction_f$flux) %>%
       select(SITE_ID, EcoType, Year, month, is_arid, weak_source, magnitude_model,
              monthly_flux_gC_m2_month, predicted_flux_gC_m2_month))
   }
@@ -451,7 +446,7 @@ if (!is.null(oob_skill)) {
 # ── Narrative summary (regenerated from the tables above on every run) ────────
 
 narrative_lines <- c(sprintf(
-  "Leave-one-site-out (LOSO) cross-validation refits Stage 1 and Stage 2 on all NEON upland sites except one, predicts that held-out site's months, and repeats for every site (%d folds, %d sites total). %d of those sites cross the aridity_index < %d Arid threshold; mirroring 12_SourceProp_MagnitudeModels.R's production design, Arid site-months are excluded from Stage 1 and the source-magnitude model in EVERY fold (not just when an Arid site is held out), and when an Arid site itself is held out, its test months are scored against the fold's sink model directly (labeled \"Weak-sink (forced, Arid)\" in the predictions table), matching how 13_Global_SpatialUpscalingRF.R actually treats Arid cells.",
+  "Leave-one-site-out (LOSO) cross-validation refits Stage 1 and Stage 2 on all NEON upland sites except one, predicts that held-out site's months, and repeats for every site (%d folds, %d sites total). %d of those sites cross the aridity_index < %d Arid threshold; mirroring 12_SourceProp_MagnitudeModels.R's production design, Arid site-months are excluded from Stage 1 and the source-magnitude model in EVERY fold (not just when an Arid site is held out), and when an Arid site itself is held out, its test months are assigned dry weak-sink analog uptake from the fold's training data (labeled \"Weak-sink (forced, Arid)\" in the predictions table), matching how 13_Global_SpatialUpscalingRF.R actually treats Arid cells.",
   length(sites), length(sites), n_arid_sites, arid_ai_threshold
 ))
 
@@ -479,7 +474,7 @@ arid_loso       <- loso_skill_by_ecotype %>% filter(EcoType == "Arid")
 arid_loso_sites <- loso_predictions %>% filter(EcoType == "Arid") %>% distinct(SITE_ID) %>% nrow()
 if (nrow(arid_loso) > 0) {
   narrative_lines <- c(narrative_lines, sprintf(
-    "Arid specifically (\"Weak-sink (forced, Arid)\" in the predictions table): LOSO RMSE = %.2f g C m-2 mo-1 across %d Arid site(s) held out in turn, scored against a sink model that never saw any Arid site's months (in this fold or any other) -- interpret with caution given only %d NEON sites cross the Arid threshold at all, so this reflects how well non-Arid sink behavior extrapolates to Arid conditions, not a within-class generalization estimate.",
+    "Arid specifically (\"Weak-sink (forced, Arid)\" in the predictions table): LOSO RMSE = %.2f g C m-2 mo-1 across %d Arid site(s) held out in turn, assigned dry weak-sink climate/season analogs that never use the held-out site's months -- interpret with caution given only %d NEON sites cross the Arid threshold at all, so this measures disagreement of the forced-sink scenario with these source-observed sites, not empirical validation of arid uptake.",
     mean(arid_loso$rmse_gC_m2_month, na.rm = TRUE), arid_loso_sites, n_arid_sites
   ))
 }

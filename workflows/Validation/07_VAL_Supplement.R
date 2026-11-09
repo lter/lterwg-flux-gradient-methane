@@ -25,7 +25,7 @@ figure_dir <- "/Volumes/MaloneLab/Research/FluxGradient/Validation_Sites/FIGURES
 dir.create(figure_dir, showWarnings = FALSE, recursive = TRUE)
 
 # ── Unit conversion ────────────────────────────────────────────────────────────
-unit <- 2 * 0.0000288872 * 1000   # µmol CH4 m-2 s-1 → mgC m-2 per 30 min
+unit <- 1800 * 12.011 / 1000   # µmol CH4 m-2 s-1 → mg C m-2 per 30 min (21.62; was 2 * 0.0000288872 * 1000, 374x too small)
 
 # ── Site metadata (from attr files and Val_canopy.csv) ─────────────────────────
 site_meta <- list(

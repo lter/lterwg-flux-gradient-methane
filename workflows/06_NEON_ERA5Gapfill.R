@@ -58,7 +58,8 @@ era5_hourly_file <- "OUTPUT/NEON_ERA5_hourly_site_covariates.csv.gz"
 era5_halfhour_file <- "OUTPUT/NEON_ERA5_30min_site_covariates.csv.gz"
 era5_fetch_log_file <- "OUTPUT/NEON_ERA5_fetch_log.csv"
 
-flux_to_mgC_30min <- 2 * 0.0000288872 * 1000
+flux_to_mgC_30min <- 1800 * 12.011 / 1000  # mg C m-2 per 30 min per (umol CH4 m-2 s-1) = 21.62
+# (was 2 * 0.0000288872 * 1000 = 0.0578: g CH4 per nmol, per hour - 374x too small; corrected Oct 2026)
 seconds_per_30min <- 30 * 60
 ug_c_per_umol_c <- 12.011
 min_training_obs_per_site <- 50
@@ -95,7 +96,7 @@ site_years <- ch4_30min %>%
 year_min <- min(site_years$Year, na.rm = TRUE)
 year_max <- max(site_years$Year, na.rm = TRUE)
 start_date <- as.Date(paste0(year_min, "-01-01"))
-end_date <- as.Date(paste0(year_max, "-12-31"))
+end_date <- min(as.Date(paste0(year_max, "-12-31")), Sys.Date() - 1L)
 
 site_metadata <- read.csv(metadata_file) %>%
   transmute(
@@ -132,7 +133,8 @@ fetch_open_meteo_era5_site <- function(site, latitude, longitude, start_date, en
     latitude = latitude,
     longitude = longitude,
     start_date = as.character(start_date),
-    end_date = as.character(end_date),
+    # Archive requests cannot include future dates in an ongoing flux year.
+    end_date = as.character(min(end_date, Sys.Date() - 1L)),
     hourly = hourly_vars,
     timezone = "UTC",
     models = "era5"
@@ -142,7 +144,31 @@ fetch_open_meteo_era5_site <- function(site, latitude, longitude, start_date, en
     paste(paste0(names(query), "=", utils::URLencode(as.character(query), reserved = TRUE)), collapse = "&")
   )
 
-  parsed <- jsonlite::fromJSON(url)
+  cache_root <- if (exists("DirRepo.ch4")) dirname(DirRepo.ch4) else localdir.ch4
+  cache_dir <- file.path(cache_root, "NEON_ERA5_site_cache")
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+  cache_file <- file.path(cache_dir, paste0(site, "_", start_date, "_", end_date, ".rds"))
+  cached <- if (file.exists(cache_file)) readRDS(cache_file) else NULL
+  if (!is.null(cached) && identical(cached$url, url)) {
+    message("  Reusing cached site download: ", site)
+    parsed <- cached$data
+  } else {
+    old_timeout <- getOption("timeout")
+    options(timeout = max(300, old_timeout))
+    on.exit(options(timeout = old_timeout), add = TRUE)
+    for (attempt in seq_len(8L)) {
+      parsed <- tryCatch(jsonlite::fromJSON(url), error = identity)
+      if (!inherits(parsed, "error")) break
+      if (attempt == 8L) stop(parsed)
+      message("  Download attempt ", attempt, " failed for ", site,
+              "; retrying in 60 seconds: ", conditionMessage(parsed))
+      Sys.sleep(60)
+    }
+    if (is.null(parsed$hourly$time)) stop("Invalid ERA5 response for ", site)
+    tmp <- paste0(cache_file, ".tmp")
+    saveRDS(list(url = url, data = parsed), tmp)
+    if (!file.rename(tmp, cache_file)) stop("Cannot save ERA5 site cache: ", site)
+  }
 
   required_vars <- c("time", "temperature_2m", "soil_moisture_0_to_7cm")
   missing_vars  <- required_vars[!required_vars %in% names(parsed$hourly)]
@@ -288,6 +314,7 @@ site_year_grid <- site_years %>%
       levels = c("Winter", "Spring", "Summer", "Autumn")
     )
   ) %>%
+  filter(Date <= end_date) %>%
   left_join(site_metadata %>% dplyr::select(SITE_ID, EcoType), by = "SITE_ID") %>%
   mutate(EcoType = factor(EcoType))
 
@@ -402,12 +429,16 @@ if (!era5_halfhour_cache_valid) {
   data.table::fwrite(era5_halfhour, era5_halfhour_file)
 }
 
+era5_halfhour <- era5_halfhour %>% filter(Date <= end_date)
+
 # ── Climatological flux lookup tables ────────────────────────────────────────
 # Computed from all observed CH4 half-hours. Three levels of specificity;
 # joined in cascade so the finest available value is used as a predictor.
 # For gap periods the lookup is out-of-sample (no data exists for that slot
 # by definition). For observed training steps the mean includes the target
-# observation (1/n dilution) — acceptable for gap-filling applications.
+# observation. These lookups support production gap filling, but make OOB
+# metrics optimistic; see workflows/check/NEON.ERA5.BlockedGapfillAudit.R,
+# which rebuilds the lookup after withholding contiguous observed-flux blocks.
 
 obs_ch4 <- ch4_30min %>%
   filter(is.finite(CH4_mgC_30min)) %>%
@@ -518,7 +549,8 @@ site_training_counts <- training_data %>%
 #   rf_site  : RF with SITE_ID as a predictor (site-level offsets).
 #              Used for sites with >= min_training_obs_per_site observations.
 #   rf_pop   : RF without SITE_ID (population-level, used for all gap periods).
-# OOB predictions used for ALL evaluation (no data leakage).
+# OOB predictions are fit diagnostics only: the all-data climatology predictor
+# contains each observed target, so OOB metrics are not leakage-free evaluation.
 
 rf_predictors_pop <- c(
   "ERA5_Tair_C", "ERA5_Tsoil_C", "ERA5_VSWC", "ERA5_VSWC_deep",
@@ -604,7 +636,7 @@ capture.output(
   file = "OUTPUT/NEON_ERA5_halfhour_gapfill_model_summary.txt"
 )
 
-# ── OOB fit metrics (honest — no data leakage) ───────────────────────────────
+# ── OOB fit diagnostics (climatology predictor includes each target) ──────────
 
 training_fit <- training_rf %>%
   mutate(
@@ -927,12 +959,29 @@ era5_annual_budget_pre <- era5_gapfilled_30min %>%
     n_gapfilled                     = sum(!observed_flux,   na.rm = TRUE),
     observed_coverage               = mean(observed_flux,   na.rm = TRUE),
     n_training_obs                  = max(n_training_obs,   na.rm = TRUE),
+    period_start = min(Date),
+    period_end = max(Date),
+    n_finite_flux = sum(is.finite(gapfilled_CH4_mgC_30min)),
     annual_budget_gC_m2_yr          = sum(gapfilled_CH4_mgC_30min, na.rm = TRUE) / 1000,
     model_only_annual_budget_gC_m2_yr = sum(pred_CH4_mgC_30min,    na.rm = TRUE) / 1000,
     observed_partial_gC_m2          = sum(CH4_mgC_30min[observed_flux],  na.rm = TRUE) / 1000,
     gapfilled_partial_gC_m2         = sum(gapfilled_CH4_mgC_30min[!observed_flux], na.rm = TRUE) / 1000,
     .groups = "drop"
   )
+
+era5_annual_budget_pre <- era5_annual_budget_pre %>%
+  mutate(
+    expected_30min = as.integer(as.Date(paste0(Year + 1L, "-01-01")) -
+                                as.Date(paste0(Year, "-01-01"))) * 48L,
+    complete_year = n_30min == expected_30min & n_finite_flux == expected_30min
+  )
+# Retain current-year fluxes, but do not label a partial period an annual budget.
+era5_annual_budget_pre %>%
+  filter(!complete_year) %>%
+  rename(period_budget_gC_m2 = annual_budget_gC_m2_yr,
+         model_only_period_budget_gC_m2 = model_only_annual_budget_gC_m2_yr) %>%
+  write.csv("OUTPUT/NEON_ERA5_gapfilled_partial_year_budget.csv", row.names = FALSE)
+era5_annual_budget_pre <- era5_annual_budget_pre %>% filter(complete_year)
 
 sign_sensitivity <- era5_annual_budget_pre %>%
   left_join(
