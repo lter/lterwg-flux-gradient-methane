@@ -1,6 +1,5 @@
 # Determine the RSHP based on CCC >= 0.5 for CO2 and H2O, and the CH4 pairs (= CO2 RSHPs):
-
-source(fs::path(DirRepo.ch4,'functions/calc_CCC_SHP.R' ))
+# (calc_CCC_SHP.R not needed: CCC comes from the evaluation run's SITES_One2One)
 
 # Get a list of good levels at each site for CO2 and H2O:
 # v3b evaluation run (lterwg-flux-gradient-eval, run.tag "_AA_AW_2021_2026_v3b"): CO2/H2O CCC against EC per pair
@@ -69,9 +68,6 @@ if (requireNamespace("caret", quietly = TRUE)) print(caret::confusionMatrix(NEON
 
 NEON_RSHP_EVAL$RSHP.CO2 %>% summary
 NEON_RSHP_EVAL$RSHP.H2O %>% summary
-
-
-
 
 save( NEON_RSHP_EVAL, CH4.fallback.sites,
       file=fs::path(localdir.ch4 ,paste0("NEON_RSHP_CCC.Rdata")))
