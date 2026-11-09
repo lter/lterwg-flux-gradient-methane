@@ -1,4 +1,7 @@
 # 03_NEON_EnsembleNoEC.R ------------------------------------------------------------------------
+# Nov 2026: reads the v3b fluxes (NEON_GradientFlux_EDI_2021_2026_v3b). With the CH4 pair rule of 28 Oct 2026, the
+# ensemble written here is replaced by steps 02-03; this script supplies the filtered + despiked CH4 data
+# (SITE_DATA_FILTERED_CH4.Rdata) and the no-EC diagnostics (NEON_CH4_noEC_*.csv).
 # Rebuilds SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE for CH4 from the 2021-2026 gradient fluxes using the
 # EC-free pair selection of Supplement S2 (lterwg-flux-gradient-eval, flow.evaluation.noEC_pair_selection.R).
 # Replaces steps 01-03 for the CH4 ensemble. (The previous 02/03 selected pairs on CO2/H2O CCC against EC
@@ -35,14 +38,16 @@ library(sf)
 
 if (!exists("localdir"))     localdir     <- "/Volumes/MaloneLab/Research/FluxGradient"
 if (!exists("localdir.ch4")) localdir.ch4 <- file.path(localdir, "METHANE")
-if (!exists("gf.dir"))       gf.dir       <- file.path(localdir, "NEON_GradientFlux_EDI_2021_2026")  # per-site <SITE>_<APP>_9min.df.final.csv
+if (!exists("gf.dir"))       gf.dir       <- file.path(localdir, "NEON_GradientFlux_EDI_2021_2026_v3b")  # per-site <SITE>_<APP>_9min.df.final.csv (v3b, Nov 2026)
 if (!exists("ccc.cut"))      ccc.cut      <- 0.45
 if (!exists("min.windows"))  min.windows  <- 30
 if (!exists("snr.min"))      snr.min      <- 3
 if (!exists("despike.k"))    despike.k    <- 6
-if (!exists("archive.tag"))  archive.tag  <- "2026-06_RSHP_mixedgas"
+if (!exists("archive.tag"))  archive.tag  <- "2026-11_pre_v3b"   # Oct 2026 (pre-v3b) CH4 files are copied here before overwrite
 if (!exists("sites.run"))    sites.run    <- NULL   # e.g. c("KONZ","TALL") to test; NULL = all sites
 if (!exists("checkpoint.dir")) checkpoint.dir <- NULL  # optional local per-site restart cache
+if (!exists("noec.checkpoint.only")) noec.checkpoint.only <- FALSE  # TRUE: only write per-site checkpoints (cluster array jobs); a later
+                                                                  # run over all sites restores them and writes the combined files
 
 # ---- helpers -------------------------------------------------------------------------------------
 lccc <- function(x, y) { ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]
@@ -257,6 +262,11 @@ for (site in site.list) {
   rm(D, P, X9, E); invisible(gc())
 }
 
+if (isTRUE(noec.checkpoint.only)) {
+  if (is.null(checkpoint.dir)) stop("noec.checkpoint.only needs checkpoint.dir")
+  message("Checkpoints written for: ", paste(site.list, collapse = ", "))
+} else {
+
 ref.tab  <- rbindlist(ref.tab, fill = TRUE)
 pair.tab <- rbindlist(pair.tab, fill = TRUE)
 cand.tab <- rbindlist(cand.tab, fill = TRUE)
@@ -288,3 +298,4 @@ fwrite(ref.tab,  file.path(localdir.ch4, paste0("NEON_CH4_noEC_reference_by_site
 fwrite(pair.tab, file.path(localdir.ch4, paste0("NEON_CH4_noEC_pairs", sfx, ".csv")))
 fwrite(cand.tab, file.path(localdir.ch4, paste0("NEON_CH4_noEC_reference_candidates", sfx, ".csv")))
 message("Saved ", out.ens)
+}

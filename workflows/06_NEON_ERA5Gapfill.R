@@ -14,8 +14,8 @@ library(patchwork)
 library(jsonlite)
 library(data.table)
 
-localdir <- "/Volumes/MaloneLab/Research/FluxGradient"
-localdir.ch4 <- "/Volumes/MaloneLab/Research/FluxGradient/Methane"
+if (!exists("localdir"))     localdir     <- "/Volumes/MaloneLab/Research/FluxGradient"
+if (!exists("localdir.ch4")) localdir.ch4 <- file.path(localdir, "METHANE")
 setwd(localdir.ch4)
 
 dir.create("OUTPUT", showWarnings = FALSE)

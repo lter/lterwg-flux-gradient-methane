@@ -15,11 +15,13 @@ Scripts are named `##_STEP_Description.R` where `##` is the run order and `STEP`
 
 **NEON Data Processing**
 
-- `03_NEON_EnsembleNoEC.R` — Current CH4 processing entrypoint, replacing the older steps 01–03. Filters and despikes CH4 only, selects an MBR reference without EC, and adds rescaled AE/WP series with CCC ≥ 0.45 against that reference. Set `sites.run <- c("KONZ", "TALL")` for separate `*_TEST` outputs; use `sites.run <- NULL` for all sites. Production inputs being replaced are archived by the script.
-- `01_NEON_FilterQC.R` — Applies quality filters to raw NEON gradient flux data and computes QC flags across all sites.
-- `02_NEON_SensorHeightPairs.R` — Identifies representative sensor height pairs (RSHP) based on concordance correlation coefficient (CCC ≥ 0.5) for CO2 and H2O.
-- `03_NEON_EnsembleGapfill.R` — Ensemble gap-fills gradient fluxes (MBR, AE, WP methods) across all sites.
-- `04_NEON_TotalFlux.R` — Combines ensemble gradient flux with storage flux to produce total CH4 flux.
+Steps 01–03 (Nov 2026) run on the v3b gradient fluxes (`NEON_GradientFlux_EDI_2021_2026_v3b`):
+
+- `03_NEON_EnsembleNoEC.R` — Step 01. Filters and despikes the CH4 gradient fluxes (dConc SNR ≥ 3, tracer SNR ≥ 3 for MBR, u* threshold; median ± 6 MAD by day/night × season) and writes the filtered CH4 files plus the no-EC (Supplement S2) diagnostics `NEON_CH4_noEC_*.csv`. Files it replaces are archived to `METHANE/archive_2026-11_pre_v3b/`. `noec.checkpoint.only <- TRUE` with a `checkpoint.dir` runs one site per cluster job; a final all-site run restores the checkpoints and writes the combined files.
+- `02_NEON_SensorHeightPairs.R` — Identifies reliable sensor height pairs (RSHP; CCC ≥ 0.5 against EC) for CO2 and H2O from the v3b evaluation (`SITES_One2One_AA_AW_2021_2026_v3b.RData`). CH4 has no EC at NEON, so the CH4 pairs are the CO2 RSHPs (`RSHP.CH4`); sites with no CO2 RSHP are listed in `CH4.fallback.sites`.
+- `03_NEON_EnsembleGapfill.R` — Builds the 30-min CH4 ensemble: equal-weight mean of the CO2-RSHP pairs; at `CH4.fallback.sites`, the no-EC rule of essd-2026-413 Supplement S2 (AA MBR reference plus AE/WP pairs with CCC ≥ 0.5 against it, rescaled). Writes `CH4_PAIR_SELECTION.csv` (pairs and rule used at each site).
+- `01_NEON_FilterQC.R` — Original filter step (superseded; kept for reference).
+- `04_NEON_TotalFlux.R` — Adds the v3b storage flux (`<SITE>/<SITE>_STORAGE_FLUX_30min.csv`, CH4, `storage_flux_filled`) to the ensemble gradient flux to give total CH4 flux.
 - `00_NEON_UpdateSoilMoisture.R` — Runs after 04 and before 05 to refresh missing monthly soil covariates from NEON DP1.00094.001. Uses the existing 30-minute, vertical-position-501 aggregation across soil plots, records source URLs/releases/checksums, and archives the original monthly R data. Downloads require `NEON_TOKEN` in a local `.Renviron` file (already git-ignored). Optional `SOIL_START_MONTH` and `SOIL_END_MONTH` environment variables prefetch an explicit month range for all metadata sites; otherwise missing months are inferred from the total-flux record.
 
 **Site-level Analysis**

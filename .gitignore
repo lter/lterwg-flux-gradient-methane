@@ -87,6 +87,7 @@ vignettes/*.pdf
 # data/
 # graphs/
 run_logs
+bouchet
 
 # Files to ignore:
 Cover Letter_Nature.docx

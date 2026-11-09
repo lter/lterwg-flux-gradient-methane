@@ -27,18 +27,33 @@ site.list <- metadata$Site_Id.NEON %>% unique
 
 # ── NEON DATA PROCESSING ──────────────────────────────────────────────────────
 
-# 01-03 (Oct 2026) CH4 filter + despike + EC-free ensemble (Supplement S2 rule) on the 2021-2026 fluxes.
-# Reference = AA MBR (tracer / sign group chosen by agreement with AE/WP when a tracer shows a sign split);
-# AE/WP pairs with CCC >= 0.45 against it are rescaled (RMA) and averaged in. Writes
-# SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE.Rdata, the CH4 9-min filter files and NEON_CH4_noEC_*.csv;
-# the files it replaces are copied to METHANE/archive_2026-06_RSHP_mixedgas/ first.
-# Test on a few sites first with: sites.run <- c("KONZ","TALL")  (writes *_TEST files only); then sites.run <- NULL
-message('Steps 01-03: CH4 filter, despike and no-EC ensemble...')
-sites.run <- NULL
+# 01-03 (Nov 2026) CH4 on the v3b fluxes (NEON_GradientFlux_EDI_2021_2026_v3b) with the 28 Oct 2026 pair rule.
+# 01  Filter + despike CH4 (03_NEON_EnsembleNoEC.R; SD-based SNR >= 3, tracer SNR >= 3 for MBR, u* threshold,
+#     median +/- 6 MAD despike by day/night x season). Writes NEON_GradientFlux_Data_Filter/*_CH4.Rdata and the
+#     no-EC (S2) diagnostics NEON_CH4_noEC_*.csv; files it replaces are copied to METHANE/archive_2026-11_pre_v3b/.
+#     Its own S2 ensemble is replaced by step 03 below.
+# 02  CH4 pairs = CO2 RSHPs (CCC >= 0.5 vs CO2 EC, v3b evaluation: SITES_One2One_AA_AW_2021_2026_v3b.RData);
+#     sites with no CO2 RSHP -> CH4.fallback.sites.
+# 03  CH4 ensemble: mean of the CO2-RSHP pairs; at fallback sites the S2 rule (AA MBR reference + AE/WP with
+#     CCC >= 0.5 against it, rescaled). Writes SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE.Rdata and CH4_PAIR_SELECTION.csv.
+# On Bouchet these steps run through bouchet/run_ch4_v3b.sh (per-site array for step 01, then 01-combine, 02-04).
+gf.dir       <- fs::path(localdir, "NEON_GradientFlux_EDI_2021_2026_v3b")
+one2one.file <- fs::path(localdir, "NEON_GradientFlux_Data_Filter/SITES_One2One_AA_AW_2021_2026_v3b.RData")
+upload.drive <- FALSE
+sites.run    <- NULL   # c("KONZ","TALL") writes *_TEST files only (step 01)
+
+message('Step 01: CH4 filter + despike (v3b)...')
 source(fs::path(DirRepo.ch4, 'workflows/03_NEON_EnsembleNoEC.R'))
 
-# Previous steps 01-03 (kept for reference; superseded Oct 2026). The old step 03 averaged FG_mean over
-# CO2, H2O and CH4 together because SITE_DATA_FILTERED was not subset to CH4.
+message('Step 02: CH4 pairs from CO2 RSHPs...')
+source(fs::path(DirRepo.ch4, 'workflows/02_NEON_SensorHeightPairs.R'))
+
+message('Step 03: CH4 ensemble...')
+source(fs::path(DirRepo.ch4, 'workflows/03_NEON_EnsembleGapfill.R'))
+
+# Original steps 01-03 (kept for reference; superseded Oct 2026). The old step 03 averaged FG_mean over
+# CO2, H2O and CH4 together because SITE_DATA_FILTERED was not subset to CH4. (Steps 02/03 above are the
+# CH4-only rewrites of these files.)
 if (FALSE) {
   # 01 Filter raw NEON gradient flux data and compute QC flags
   message('Step 01: Filtering NEON data...')
@@ -60,16 +75,9 @@ if (FALSE) {
   save(SITES_WP_9min_FILTER, file = fileSave)
   googledrive::drive_upload(media = fileSave, overwrite = T, path = drive_url)
 
-  # 02 Identify representative sensor height pairs (RSHP) using CCC for CO2/H2O
-  message('Step 02: Identifying sensor height pairs...')
-  source(fs::path(DirRepo.ch4, 'workflows/02_NEON_SensorHeightPairs.R'))
-
-  # 03 Ensemble gap-fill the gradient fluxes across methods
-  message('Step 03: Ensemble gap-filling...')
-  source(fs::path(DirRepo.ch4, 'workflows/03_NEON_EnsembleGapfill.R'))
 }
 
-# 04 Combine ensemble gradient flux with storage flux to get total flux
+# 04 Combine ensemble gradient flux with v3b storage flux (<SITE>_STORAGE_FLUX_30min.csv) to get total flux
 message('Step 04: Computing total flux...')
 source(fs::path(DirRepo.ch4, 'workflows/04_NEON_TotalFlux.R'))
 

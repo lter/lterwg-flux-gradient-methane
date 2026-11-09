@@ -1,25 +1,26 @@
 # 04_NEON_TotalFlux.R
 # Total CH4 flux = ensemble gradient flux + storage flux.
-# Storage flux (lterwg-flux-gradient: flow.neon.storage.R -> flow.neon.storage.compile.R), one file per NEON period:
-#   NEON_Storage_Flux/NEON_storage.RData                 Aug 2021 - Jun 2024
-#   NEON_Storage_Flux_202407_202608/NEON_storage.RData   Jul 2024 - Aug 2026 (Oct 2026 run)
-# Both are stacked per site (CH4 only); where a half-hour appears in both, the newer period is kept.
+# Storage flux: v3b release (lterwg-flux-gradient, recomputed Nov 2026), one CSV per site covering Aug 2021 - Aug 2026:
+#   NEON_GradientFlux_EDI_2021_2026_v3b/<SITE>/<SITE>_STORAGE_FLUX_30min.csv   (timestamps in UTC)
+# CH4 rows only; storage_flux_filled (native sign, gap-filled) is joined on the interval-end label
+# time_halfhour_storage_end, as before. (Previously: NEON_Storage_Flux/ and NEON_Storage_Flux_202407_202608/ RData.)
+library(data.table)
+# storage.dir may also be several folders in time order (e.g. the two per-period EDI folders on Bouchet,
+# NEON_GradientFlux_EDI_202108_202406_v3b and _202407_202608_v3b); a half-hour present in both keeps the later folder.
+if (!exists("storage.dir")) storage.dir <- file.path(localdir, "NEON_GradientFlux_EDI_2021_2026_v3b")
 
-storage.files <- c(file.path(localdir, "NEON_Storage_Flux", "NEON_storage.RData"),
-                   file.path(localdir, "NEON_Storage_Flux_202407_202608", "NEON_storage.RData"))
-
-storage.ch4 <- list()
-for (k in seq_along(storage.files)) {
-  e <- new.env(); load(storage.files[k], envir = e)
-  for (s in names(e$NEON_storage)) {
-    storage.ch4[[s]] <- rbind(storage.ch4[[s]],
-      e$NEON_storage[[s]] %>% filter(gas == "CH4") %>%
-        transmute(time.rounded = time_halfhour_storage_end, storage_flux_filled, period = k))
-  }
-  rm(e); invisible(gc())
+read_storage_ch4 <- function(site) {
+  f <- file.path(storage.dir, site, paste0(site, "_STORAGE_FLUX_30min.csv"))
+  f <- f[file.exists(f)]
+  if (!length(f)) { message("  no storage file for ", site); return(NULL) }
+  d <- rbindlist(lapply(seq_along(f), function(k)
+    fread(f[k], select = c("gas", "time_halfhour_storage_end", "storage_flux_filled"), showProgress = FALSE)[gas == "CH4"][, period := k]))
+  d <- d[, .(time.rounded = as.POSIXct(as.character(time_halfhour_storage_end), format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
+             storage_flux_filled = as.numeric(storage_flux_filled), period)]
+  setorder(d, time.rounded, -period)
+  d <- unique(d[!is.na(time.rounded)], by = "time.rounded")[, period := NULL]
+  as.data.frame(d)
 }
-storage.ch4 <- lapply(storage.ch4, function(x) x %>% arrange(time.rounded, desc(period)) %>%
-                        distinct(time.rounded, .keep_all = TRUE) %>% select(-period))
 
 load(fs::path(localdir.ch4, "SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE.Rdata"))
 site.list <- names(SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE)
@@ -27,7 +28,7 @@ site.list <- names(SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE)
 SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_storage <- list()
 for (site in site.list) {
   flux.site <- SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE[[site]]
-  flux.storage.site <- storage.ch4[[site]]
+  flux.storage.site <- read_storage_ch4(site)
   if (is.null(flux.storage.site)) flux.storage.site <- data.frame(time.rounded = as.POSIXct(character(0), tz = "UTC"), storage_flux_filled = numeric(0))
   SITE_DATA_FILTERED_Final_RSHP_ENSEMBLE_storage[[site]] <- flux.site %>%
     full_join(flux.storage.site, by = "time.rounded") %>%
